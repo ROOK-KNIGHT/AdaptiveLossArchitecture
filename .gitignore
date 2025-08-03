@@ -1,0 +1,87 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual Environment
+venv/
+env/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# API Keys and Sensitive Data
+*.json
+!requirements.txt
+cs_tokens.json
+api_keys.txt
+credentials.txt
+.env
+
+# Data files (keep structure but not actual data)
+data/*.csv
+data/NVDA_*.csv
+data/results/json/*.json
+data/results/visualizations/*.png
+data/results/reports/*.md
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+*.tmp
+*.temp
+temp/
+
+# Model outputs
+*.pkl
+*.joblib
+*.h5
+*.model
+
+# Jupyter Notebooks
+.ipynb_checkpoints/
+*.ipynb
+
+# pytest
+.pytest_cache/
+.coverage
+htmlcov/
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
