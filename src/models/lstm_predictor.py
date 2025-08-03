@@ -40,8 +40,18 @@ def load_config():
     with open(config_path, 'r') as file:
         return yaml.safe_load(file)
 
+def load_indicators_config():
+    """Load technical indicators configuration from YAML file"""
+    config_path = os.path.join(os.path.dirname(__file__), '..', '..', 'config', 'technical_indicators_config.yaml')
+    if not os.path.exists(config_path):
+        raise FileNotFoundError(f"Technical indicators configuration file not found: {config_path}")
+    
+    with open(config_path, 'r') as file:
+        return yaml.safe_load(file)
+
 # Load global configuration
 CONFIG = load_config()
+INDICATORS_CONFIG = load_indicators_config()
 
 # Add the project root to path for imports
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..'))

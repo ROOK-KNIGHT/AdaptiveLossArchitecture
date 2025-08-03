@@ -1,0 +1,584 @@
+# Technical Indicators Configuration File
+# This file controls which technical indicators are calculated and used by all models
+# Add or remove indicators as needed - models will automatically adapt
+
+# Global Settings
+global_settings:
+  # Enable/disable entire indicator categories
+  enable_trend_indicators: true
+  enable_momentum_indicators: true
+  enable_volume_indicators: true
+  enable_volatility_indicators: true
+  enable_signal_indicators: true
+  enable_advanced_indicators: true
+  
+  # Data requirements
+  minimum_data_points: 200  # Minimum data points needed for calculations
+  
+  # Feature selection preferences
+  max_indicators_per_category: 5  # Maximum indicators per category when enforcing diversity
+  correlation_threshold: 0.95  # Remove highly correlated indicators above this threshold
+
+# Trend Indicators
+trend_indicators:
+  # Simple Moving Averages
+  sma_5:
+    enabled: true
+    function: "calculate_sma"
+    parameters:
+      window: 5
+    category: "trend"
+    description: "5-period Simple Moving Average"
+    
+  sma_10:
+    enabled: true
+    function: "calculate_sma"
+    parameters:
+      window: 10
+    category: "trend"
+    description: "10-period Simple Moving Average"
+    
+  sma_20:
+    enabled: true
+    function: "calculate_sma"
+    parameters:
+      window: 20
+    category: "trend"
+    description: "20-period Simple Moving Average"
+    
+  sma_50:
+    enabled: true
+    function: "calculate_sma"
+    parameters:
+      window: 50
+    category: "trend"
+    description: "50-period Simple Moving Average"
+    
+  sma_200:
+    enabled: true
+    function: "calculate_sma"
+    parameters:
+      window: 200
+    category: "trend"
+    description: "200-period Simple Moving Average"
+  
+  # Exponential Moving Averages
+  ema_12:
+    enabled: true
+    function: "calculate_ema"
+    parameters:
+      window: 12
+    category: "trend"
+    description: "12-period Exponential Moving Average"
+    
+  ema_26:
+    enabled: true
+    function: "calculate_ema"
+    parameters:
+      window: 26
+    category: "trend"
+    description: "26-period Exponential Moving Average"
+    
+  ema_50:
+    enabled: true
+    function: "calculate_ema"
+    parameters:
+      window: 50
+    category: "trend"
+    description: "50-period Exponential Moving Average"
+  
+  # Volume Weighted Average Price
+  vwap:
+    enabled: true
+    function: "calculate_vwap"
+    parameters: {}
+    category: "trend"
+    description: "Volume Weighted Average Price"
+  
+  # Parabolic SAR
+  parabolic_sar:
+    enabled: true
+    function: "calculate_parabolic_sar"
+    parameters:
+      af_start: 0.02
+      af_increment: 0.02
+      af_max: 0.2
+    category: "trend"
+    description: "Parabolic Stop and Reverse"
+
+# Momentum Indicators
+momentum_indicators:
+  # Relative Strength Index
+  rsi_14:
+    enabled: true
+    function: "calculate_rsi"
+    parameters:
+      window: 14
+    category: "momentum"
+    description: "14-period Relative Strength Index"
+  
+  # Stochastic Oscillator
+  stochastic_k:
+    enabled: true
+    function: "calculate_stochastic"
+    parameters:
+      k_window: 14
+      d_window: 3
+    category: "momentum"
+    description: "Stochastic %K"
+    output_field: "k_percent"
+    
+  stochastic_d:
+    enabled: true
+    function: "calculate_stochastic"
+    parameters:
+      k_window: 14
+      d_window: 3
+    category: "momentum"
+    description: "Stochastic %D"
+    output_field: "d_percent"
+  
+  # Williams %R
+  williams_r:
+    enabled: true
+    function: "calculate_williams_r"
+    parameters:
+      window: 14
+    category: "momentum"
+    description: "Williams %R"
+  
+  # Commodity Channel Index
+  cci:
+    enabled: true
+    function: "calculate_cci"
+    parameters:
+      window: 20
+    category: "momentum"
+    description: "Commodity Channel Index"
+  
+  # Money Flow Index
+  mfi:
+    enabled: true
+    function: "calculate_mfi"
+    parameters:
+      window: 14
+    category: "momentum"
+    description: "Money Flow Index"
+  
+  # Momentum
+  momentum_10:
+    enabled: true
+    function: "calculate_momentum"
+    parameters:
+      window: 10
+    category: "momentum"
+    description: "10-period Momentum"
+  
+  # Rate of Change
+  roc_12:
+    enabled: true
+    function: "calculate_roc"
+    parameters:
+      window: 12
+    category: "momentum"
+    description: "12-period Rate of Change"
+
+# Volume Indicators
+volume_indicators:
+  # On-Balance Volume
+  obv:
+    enabled: true
+    function: "calculate_obv"
+    parameters: {}
+    category: "volume"
+    description: "On-Balance Volume"
+  
+  # Accumulation/Distribution Line
+  adl:
+    enabled: true
+    function: "calculate_adl"
+    parameters: {}
+    category: "volume"
+    description: "Accumulation/Distribution Line"
+  
+  # Volume Simple Moving Average
+  volume_sma_20:
+    enabled: true
+    function: "calculate_sma"
+    parameters:
+      window: 20
+    category: "volume"
+    description: "20-period Volume Simple Moving Average"
+    input_field: "volume"
+  
+  # Volume Ratio
+  volume_ratio:
+    enabled: true
+    function: "calculate_volume_ratio"
+    parameters:
+      window: 20
+    category: "volume"
+    description: "Volume Ratio (Current Volume / Average Volume)"
+
+# Volatility Indicators
+volatility_indicators:
+  # Average True Range
+  atr_14:
+    enabled: true
+    function: "calculate_atr"
+    parameters:
+      window: 14
+    category: "volatility"
+    description: "14-period Average True Range"
+  
+  # Historical Volatility
+  volatility_20:
+    enabled: true
+    function: "calculate_volatility"
+    parameters:
+      window: 20
+    category: "volatility"
+    description: "20-period Historical Volatility"
+  
+  # Bollinger Bands
+  bb_upper:
+    enabled: true
+    function: "calculate_bollinger_bands"
+    parameters:
+      window: 20
+      num_std: 2
+    category: "volatility"
+    description: "Bollinger Band Upper"
+    output_field: "upper_band"
+    
+  bb_lower:
+    enabled: true
+    function: "calculate_bollinger_bands"
+    parameters:
+      window: 20
+      num_std: 2
+    category: "volatility"
+    description: "Bollinger Band Lower"
+    output_field: "lower_band"
+    
+  bb_middle:
+    enabled: true
+    function: "calculate_bollinger_bands"
+    parameters:
+      window: 20
+      num_std: 2
+    category: "volatility"
+    description: "Bollinger Band Middle (SMA)"
+    output_field: "middle_band"
+    
+  bb_width:
+    enabled: true
+    function: "calculate_bb_width"
+    parameters:
+      window: 20
+      num_std: 2
+    category: "volatility"
+    description: "Bollinger Band Width"
+    
+  bb_position:
+    enabled: true
+    function: "calculate_bb_position"
+    parameters:
+      window: 20
+      num_std: 2
+    category: "volatility"
+    description: "Bollinger Band Position"
+
+# Signal Indicators
+signal_indicators:
+  # MACD
+  macd_line:
+    enabled: true
+    function: "calculate_macd"
+    parameters:
+      fast: 12
+      slow: 26
+      signal: 9
+    category: "signal"
+    description: "MACD Line"
+    output_field: "macd_line"
+    
+  macd_signal:
+    enabled: true
+    function: "calculate_macd"
+    parameters:
+      fast: 12
+      slow: 26
+      signal: 9
+    category: "signal"
+    description: "MACD Signal Line"
+    output_field: "signal_line"
+    
+  macd_histogram:
+    enabled: true
+    function: "calculate_macd"
+    parameters:
+      fast: 12
+      slow: 26
+      signal: 9
+    category: "signal"
+    description: "MACD Histogram"
+    output_field: "histogram"
+
+# Advanced Indicators (Custom/Complex)
+advanced_indicators:
+  # Support and Resistance
+  support_20:
+    enabled: true
+    function: "calculate_support_resistance"
+    parameters:
+      window: 20
+    category: "advanced"
+    description: "20-period Support Level"
+    output_field: "support"
+    
+  resistance_20:
+    enabled: true
+    function: "calculate_support_resistance"
+    parameters:
+      window: 20
+    category: "advanced"
+    description: "20-period Resistance Level"
+    output_field: "resistance"
+  
+  # Price Change Indicators
+  price_change:
+    enabled: true
+    function: "calculate_price_change"
+    parameters: {}
+    category: "advanced"
+    description: "Price Change (Close - Previous Close)"
+    
+  price_change_pct:
+    enabled: true
+    function: "calculate_price_change_pct"
+    parameters: {}
+    category: "advanced"
+    description: "Price Change Percentage"
+  
+  # Advanced Volatility Metrics (from TechnicalIndicatorsCalculator)
+  volatility_high_band:
+    enabled: true
+    function: "calculate_volatility_metrics"
+    parameters:
+      lookback: 20
+    category: "advanced"
+    description: "Volatility High Band"
+    output_field: "high_band"
+    
+  volatility_low_band:
+    enabled: true
+    function: "calculate_volatility_metrics"
+    parameters:
+      lookback: 20
+    category: "advanced"
+    description: "Volatility Low Band"
+    output_field: "low_band"
+    
+  high_exceedance:
+    enabled: true
+    function: "calculate_volatility_metrics"
+    parameters:
+      lookback: 20
+    category: "advanced"
+    description: "High Band Exceedance"
+    output_field: "high_exceedance"
+    
+  low_exceedance:
+    enabled: true
+    function: "calculate_volatility_metrics"
+    parameters:
+      lookback: 20
+    category: "advanced"
+    description: "Low Band Exceedance"
+    output_field: "low_exceedance"
+    
+  position_in_range_pct:
+    enabled: true
+    function: "calculate_volatility_metrics"
+    parameters:
+      lookback: 20
+    category: "advanced"
+    description: "Position in Volatility Range (%)"
+    output_field: "position_in_range"
+    
+  distance_to_high_pct:
+    enabled: true
+    function: "calculate_volatility_metrics"
+    parameters:
+      lookback: 20
+    category: "advanced"
+    description: "Distance to High Band (%)"
+    output_field: "distance_to_high"
+    
+  distance_to_low_pct:
+    enabled: true
+    function: "calculate_volatility_metrics"
+    parameters:
+      lookback: 20
+    category: "advanced"
+    description: "Distance to Low Band (%)"
+    output_field: "distance_to_low"
+
+# Derived Indicators (Combinations/Ratios)
+derived_indicators:
+  # Moving Average Ratios
+  sma_5_20_ratio:
+    enabled: true
+    function: "calculate_ratio"
+    parameters:
+      numerator: "sma_5"
+      denominator: "sma_20"
+    category: "derived"
+    description: "SMA 5/20 Ratio"
+    
+  ema_12_26_ratio:
+    enabled: true
+    function: "calculate_ratio"
+    parameters:
+      numerator: "ema_12"
+      denominator: "ema_26"
+    category: "derived"
+    description: "EMA 12/26 Ratio"
+  
+  # Price to Moving Average Ratios
+  price_to_sma_20:
+    enabled: true
+    function: "calculate_ratio"
+    parameters:
+      numerator: "close"
+      denominator: "sma_20"
+    category: "derived"
+    description: "Price to SMA 20 Ratio"
+    
+  price_to_ema_50:
+    enabled: true
+    function: "calculate_ratio"
+    parameters:
+      numerator: "close"
+      denominator: "ema_50"
+    category: "derived"
+    description: "Price to EMA 50 Ratio"
+  
+  # Volatility Ratios
+  atr_to_price:
+    enabled: true
+    function: "calculate_ratio"
+    parameters:
+      numerator: "atr_14"
+      denominator: "close"
+    category: "derived"
+    description: "ATR to Price Ratio"
+
+# Lagged Features Configuration
+lagged_features:
+  # Enable lagged versions of indicators
+  enable_lagged_features: true
+  
+  # Lag periods to create
+  lag_periods: [1, 2, 3, 5]
+  
+  # Which indicators to create lagged versions for
+  indicators_to_lag:
+    - "rsi_14"
+    - "macd_line"
+    - "bb_position"
+    - "atr_14"
+    - "volume_ratio"
+    - "price_change_pct"
+    - "sma_20"
+    - "ema_12"
+    - "stochastic_k"
+    - "williams_r"
+
+# Feature Engineering Settings
+feature_engineering:
+  # Normalization/Scaling preferences
+  normalize_indicators: true
+  normalization_method: "robust"  # robust, standard, minmax
+  
+  # Handle missing values
+  fill_method: "forward_fill"  # forward_fill, backward_fill, interpolate, drop
+  
+  # Outlier handling
+  remove_outliers: true
+  outlier_method: "iqr"  # iqr, zscore, isolation_forest
+  outlier_threshold: 3.0
+  
+  # Feature selection
+  auto_feature_selection: true
+  selection_method: "correlation"  # correlation, mutual_info, f_regression
+  max_features: 50  # Maximum features to select if auto_feature_selection is enabled
+
+# Model-Specific Overrides
+model_overrides:
+  # Enhanced Adaptive Predictor specific settings
+  enhanced_adaptive:
+    max_features: 15
+    enforce_category_diversity: true
+    preferred_categories: ["trend", "momentum", "signal"]
+    
+  # LightGBM specific settings
+  lightgbm:
+    max_features: 30
+    enforce_category_diversity: false
+    feature_importance_threshold: 0.01
+    
+  # LSTM specific settings
+  lstm:
+    max_features: 20
+    sequence_length: 60
+    preferred_indicators: ["sma_20", "rsi_14", "macd_line", "bb_position", "atr_14"]
+    
+  # Random Forest specific settings
+  random_forest:
+    max_features: 25
+    enforce_category_diversity: true
+    
+  # XGBoost specific settings
+  xgboost:
+    max_features: 35
+    enforce_category_diversity: false
+    
+  # SVR specific settings
+  svr:
+    max_features: 12
+    enforce_category_diversity: true
+    preferred_categories: ["trend", "momentum"]
+    
+  # Linear Regression specific settings
+  linear_regression:
+    max_features: 10
+    enforce_category_diversity: true
+    remove_correlated_features: true
+
+# Validation and Quality Control
+validation:
+  # Data quality checks
+  min_non_null_ratio: 0.8  # Minimum ratio of non-null values required
+  max_correlation_threshold: 0.95  # Remove features with correlation above this
+  
+  # Indicator validation
+  validate_calculations: true
+  check_for_lookahead_bias: true
+  
+  # Performance monitoring
+  track_indicator_performance: true
+  performance_window: 252  # Trading days for performance tracking
+
+# Export Settings
+export:
+  # Save calculated indicators
+  save_indicators: true
+  output_format: "csv"  # csv, parquet, hdf5
+  include_metadata: true
+  
+  # Indicator documentation
+  generate_documentation: true
+  include_formulas: true
+  include_interpretations: true

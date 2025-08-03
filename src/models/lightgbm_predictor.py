@@ -38,8 +38,18 @@ def load_config():
     with open(config_path, 'r') as file:
         return yaml.safe_load(file)
 
+def load_indicators_config():
+    """Load technical indicators configuration from YAML file"""
+    config_path = os.path.join(os.path.dirname(__file__), '..', '..', 'config', 'technical_indicators_config.yaml')
+    if not os.path.exists(config_path):
+        raise FileNotFoundError(f"Technical indicators configuration file not found: {config_path}")
+    
+    with open(config_path, 'r') as file:
+        return yaml.safe_load(file)
+
 # Load global configuration
 CONFIG = load_config()
+INDICATORS_CONFIG = load_indicators_config()
 
 # Add the project root to path for imports
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..'))
@@ -246,8 +256,9 @@ class LightGBMStockPredictor:
         return results
     
     def analyze_feature_importance(self, feature_names: List[str]) -> None:
-        """Analyze and display feature importance"""
+        """Analyze and display feature importance using technical indicators configuration"""
         print("\n🔍 Analyzing LightGBM Feature Importance...")
+        print(f"📋 Using technical indicators configuration from: config/technical_indicators_config.yaml")
         
         if self.feature_importance is None:
             print("❌ Model must be trained first")
@@ -263,14 +274,36 @@ class LightGBMStockPredictor:
         for i, (_, row) in enumerate(importance_df.head(15).iterrows(), 1):
             print(f"  {i:2d}. {row['feature']:30s}: {row['importance']:.6f}")
         
-        # Categorize features
-        categories = {
+        # Get category definitions from technical indicators config
+        categories = {}
+        
+        # Extract category keywords from all indicator sections
+        for section_name in ['trend_indicators', 'momentum_indicators', 'volume_indicators', 
+                            'volatility_indicators', 'signal_indicators', 'advanced_indicators', 'derived_indicators']:
+            if section_name in INDICATORS_CONFIG:
+                section = INDICATORS_CONFIG[section_name]
+                for indicator_name, indicator_config in section.items():
+                    if indicator_config.get('enabled', False):
+                        category = indicator_config.get('category', 'other')
+                        if category not in categories:
+                            categories[category] = []
+                        # Add the indicator name as a keyword for categorization
+                        categories[category].append(indicator_name.lower())
+        
+        # Add traditional keyword-based categorization as fallback
+        traditional_categories = {
             'trend': ['sma', 'ema', 'ma_', 'bb_middle', 'vwap', 'psar'],
             'momentum': ['rsi', 'stoch', 'williams', 'cci', 'mfi', 'momentum', 'roc'],
             'volume': ['volume', 'obv', 'adl'],
             'volatility': ['atr', 'volatility', 'bb_width', 'bb_upper', 'bb_lower'],
             'signal': ['macd', 'bb_position']
         }
+        
+        # Merge traditional categories with config-based categories
+        for cat, keywords in traditional_categories.items():
+            if cat not in categories:
+                categories[cat] = []
+            categories[cat].extend(keywords)
         
         category_importance = {cat: 0.0 for cat in categories.keys()}
         category_importance['other'] = 0.0
@@ -288,7 +321,7 @@ class LightGBMStockPredictor:
             if not categorized:
                 category_importance['other'] += row['importance']
         
-        print(f"\nFeature Importance by Category:")
+        print(f"\nFeature Importance by Category (from config):")
         sorted_categories = sorted(category_importance.items(), key=lambda x: x[1], reverse=True)
         for category, importance in sorted_categories:
             if importance > 0:

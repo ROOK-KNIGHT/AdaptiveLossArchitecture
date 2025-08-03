@@ -40,8 +40,18 @@ def load_config():
     with open(config_path, 'r') as file:
         return yaml.safe_load(file)
 
+def load_indicators_config():
+    """Load technical indicators configuration from YAML file"""
+    config_path = os.path.join(os.path.dirname(__file__), '..', '..', 'config', 'technical_indicators_config.yaml')
+    if not os.path.exists(config_path):
+        raise FileNotFoundError(f"Technical indicators configuration file not found: {config_path}")
+    
+    with open(config_path, 'r') as file:
+        return yaml.safe_load(file)
+
 # Load global configuration
 CONFIG = load_config()
+INDICATORS_CONFIG = load_indicators_config()
 
 # Add the project root to path for imports
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..'))
@@ -390,7 +400,7 @@ def select_best_features(df: pd.DataFrame, target_col: str = 'target_return',
                         max_features: int = 15, enforce_diversity: bool = True) -> List[str]:
     """
     Intelligently select the best technical indicators based on correlation and diversity
-    ENFORCES category diversity for better trading signals
+    Uses technical indicators configuration for category definitions
     
     Args:
         df: DataFrame with technical indicators
@@ -399,6 +409,7 @@ def select_best_features(df: pd.DataFrame, target_col: str = 'target_return',
         enforce_diversity: Force minimum per category for trading edge
     """
     print(f"\nSelecting best {max_features} technical indicators for RETURN PREDICTION...")
+    print(f"📋 Using technical indicators configuration from: config/technical_indicators_config.yaml")
     
     # Calculate correlations with target
     correlations = df.corr()[target_col].abs().sort_values(ascending=False)
@@ -413,15 +424,43 @@ def select_best_features(df: pd.DataFrame, target_col: str = 'target_return',
     for i, (indicator, corr) in enumerate(correlations.head(20).items(), 1):
         print(f"  {i:2d}. {indicator}: {corr:.4f}")
     
-    # Enhanced category-aware selection for trading edge
-    selected_features = []
-    categories = {
+    # Get category definitions from technical indicators config
+    categories = {}
+    
+    # Extract category keywords from all indicator sections
+    for section_name in ['trend_indicators', 'momentum_indicators', 'volume_indicators', 
+                        'volatility_indicators', 'signal_indicators', 'advanced_indicators', 'derived_indicators']:
+        if section_name in INDICATORS_CONFIG:
+            section = INDICATORS_CONFIG[section_name]
+            for indicator_name, indicator_config in section.items():
+                if indicator_config.get('enabled', False):
+                    category = indicator_config.get('category', 'other')
+                    if category not in categories:
+                        categories[category] = []
+                    # Add the indicator name as a keyword for categorization
+                    categories[category].append(indicator_name.lower())
+    
+    # Add traditional keyword-based categorization as fallback
+    traditional_categories = {
         'trend': ['sma', 'ema', 'ma_', 'bb_middle', 'vwap', 'psar'],
         'momentum': ['rsi', 'stoch', 'williams', 'cci', 'mfi', 'momentum', 'roc'],
         'volume': ['volume', 'obv', 'adl'],
         'volatility': ['atr', 'volatility', 'bb_width', 'bb_upper', 'bb_lower'],
         'signal': ['macd', 'bb_position']
     }
+    
+    # Merge traditional categories with config-based categories
+    for cat, keywords in traditional_categories.items():
+        if cat not in categories:
+            categories[cat] = []
+        categories[cat].extend(keywords)
+    
+    print(f"\n📊 Available indicator categories from config:")
+    for cat, keywords in categories.items():
+        print(f"  {cat}: {len(keywords)} keywords")
+    
+    # Enhanced category-aware selection for trading edge
+    selected_features = []
     
     if enforce_diversity:
         # FORCE minimum per category for trading signals

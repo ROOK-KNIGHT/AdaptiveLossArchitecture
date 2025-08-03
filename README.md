@@ -42,8 +42,8 @@ AdaptiveLossArchitecture/
 │       ├── visualizations/                 # Performance plots
 │       └── reports/                        # Analysis reports
 ├── config/                                 # Configuration Management
-│   ├── model_config.yaml                  # Centralized configuration
-│   └── config_loader.py                   # Config utilities
+│   ├── model_config.yaml                  # Centralized model configuration
+│   └── technical_indicators_config.yaml   # Technical indicators configuration
 ├── handlers/                               # Data Handlers
 │   ├── fetch_data.py                      # Live data fetching
 │   ├── enhanced_data_processor.py         # Data processing
@@ -211,7 +211,9 @@ data/results/
 
 ## Configuration
 
-Centralized configuration in `config/model_config.yaml`:
+### Model Configuration (`config/model_config.yaml`)
+
+Centralized model configuration:
 
 ```yaml
 # Model parameters
@@ -241,6 +243,88 @@ adaptive_loss:
   max_weight: 0.5
   learning_rate_factor: 0.1
 ```
+
+### Technical Indicators Configuration (`config/technical_indicators_config.yaml`)
+
+**NEW**: Centralized control over all technical indicators used by models. This powerful configuration system allows you to easily customize which indicators are used across all 7 models.
+
+#### Key Features:
+- **Enable/Disable Indicators**: Simple `enabled: true/false` flags
+- **Parameter Customization**: Adjust windows, thresholds, and other parameters
+- **Category Organization**: Indicators grouped by type (trend, momentum, volume, etc.)
+- **Model-Specific Overrides**: Different settings for different models
+- **Easy Experimentation**: Test different indicator combinations instantly
+
+#### Example Configuration:
+```yaml
+# Trend Indicators
+trend_indicators:
+  sma_20:
+    enabled: true
+    function: "calculate_sma"
+    parameters:
+      window: 20
+    category: "trend"
+    description: "20-period Simple Moving Average"
+  
+  ema_12:
+    enabled: true
+    function: "calculate_ema"
+    parameters:
+      window: 12
+    category: "trend"
+    description: "12-period Exponential Moving Average"
+
+# Momentum Indicators
+momentum_indicators:
+  rsi_14:
+    enabled: true
+    function: "calculate_rsi"
+    parameters:
+      window: 14
+    category: "momentum"
+    description: "14-period Relative Strength Index"
+
+# Model-Specific Overrides
+model_overrides:
+  enhanced_adaptive:
+    max_features: 15
+    enforce_category_diversity: true
+    preferred_categories: ["trend", "momentum", "signal"]
+  
+  lightgbm:
+    max_features: 30
+    enforce_category_diversity: false
+```
+
+#### Available Indicator Categories:
+- **Trend Indicators**: SMA (5,10,20,50,200), EMA (12,26,50), VWAP, Parabolic SAR
+- **Momentum Indicators**: RSI, Stochastic, Williams %R, CCI, MFI, Momentum, ROC
+- **Volume Indicators**: OBV, ADL, Volume SMA, Volume Ratio
+- **Volatility Indicators**: ATR, Historical Volatility, Bollinger Bands
+- **Signal Indicators**: MACD (Line/Signal/Histogram)
+- **Advanced Indicators**: Support/Resistance, Volatility Bands, Price Changes
+- **Derived Indicators**: Moving Average Ratios, Price-to-MA Ratios
+
+#### How to Customize:
+```bash
+# 1. Edit the configuration file
+nano config/technical_indicators_config.yaml
+
+# 2. Enable/disable indicators
+rsi_14:
+  enabled: false  # Disable RSI
+
+# 3. Change parameters
+sma_20:
+  parameters:
+    window: 30  # Change from 20 to 30-period SMA
+
+# 4. Run any model - changes apply automatically
+python3 src/models/enhanced_adaptive_predictor.py
+```
+
+All models automatically read this configuration and adapt their feature sets accordingly. This makes it incredibly easy to experiment with different technical indicator combinations across your entire model suite.
 
 ## Key Insights
 
