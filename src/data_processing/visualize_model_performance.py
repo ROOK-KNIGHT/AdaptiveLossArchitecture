@@ -423,9 +423,11 @@ class ModelPerformanceVisualizer:
             return
         
         # Create comprehensive prediction analysis
+        self._create_detailed_prediction_vs_actual_plots(prediction_data)
         self._create_multi_target_prediction_plots(prediction_data)
         self._create_prediction_accuracy_heatmap(prediction_data)
         self._create_prediction_error_distribution(prediction_data)
+        self._create_time_series_prediction_plots(prediction_data)
         
     def _create_multi_target_prediction_plots(self, prediction_data: Dict) -> None:
         """Create prediction vs actual plots for multiple targets"""
@@ -678,6 +680,291 @@ class ModelPerformanceVisualizer:
         
         plt.tight_layout()
         plt.savefig('data/results/visualizations/prediction_error_distribution.png', dpi=300, bbox_inches='tight')
+        plt.show()
+    
+    def _create_detailed_prediction_vs_actual_plots(self, prediction_data: Dict) -> None:
+        """Create detailed prediction vs actual plots showing actual price and return values"""
+        print("📊 Creating detailed prediction vs actual value plots with price conversions...")
+        
+        # Create comprehensive plots showing both returns and converted prices
+        fig, axes = plt.subplots(3, 2, figsize=(20, 18))
+        fig.suptitle('Detailed Predictions vs Actuals: Returns and Price Analysis', fontsize=16, fontweight='bold')
+        
+        # Get the first model with data for demonstration
+        model_names = list(prediction_data.keys())
+        if not model_names:
+            return
+        
+        # Use first available model
+        first_model = model_names[0]
+        first_target = list(prediction_data[first_model].keys())[0]
+        
+        data = prediction_data[first_model][first_target]
+        return_predictions = data['predictions']
+        return_actuals = data['actuals']
+        
+        # Assume starting price of $150 for NVDA (approximate current price)
+        starting_price = 150.0
+        
+        # Convert log returns to prices
+        predicted_prices = [starting_price]
+        actual_prices = [starting_price]
+        
+        for i in range(len(return_predictions)):
+            # Convert log returns to price changes
+            pred_price = predicted_prices[-1] * np.exp(return_predictions[i])
+            actual_price = actual_prices[-1] * np.exp(return_actuals[i])
+            
+            predicted_prices.append(pred_price)
+            actual_prices.append(actual_price)
+        
+        # Remove the starting price for alignment
+        predicted_prices = predicted_prices[1:]
+        actual_prices = actual_prices[1:]
+        
+        # Plot 1: Return Predictions vs Actuals (Scatter)
+        ax1 = axes[0, 0]
+        ax1.scatter(return_actuals, return_predictions, alpha=0.7, s=50, color='blue', edgecolors='darkblue')
+        
+        # Perfect prediction line
+        min_ret = min(min(return_actuals), min(return_predictions))
+        max_ret = max(max(return_actuals), max(return_predictions))
+        ax1.plot([min_ret, max_ret], [min_ret, max_ret], 'r--', lw=2, alpha=0.8, label='Perfect Prediction')
+        
+        ax1.set_xlabel('Actual Returns (Log Returns)')
+        ax1.set_ylabel('Predicted Returns (Log Returns)')
+        ax1.set_title(f'{first_model.replace(" Predictor", "")} - Return Predictions')
+        ax1.grid(True, alpha=0.3)
+        ax1.legend()
+        
+        # Add statistics
+        r2_ret = np.corrcoef(return_actuals, return_predictions)[0, 1] ** 2
+        mae_ret = np.mean(np.abs(return_predictions - return_actuals))
+        stats_text = f'R² = {r2_ret:.3f}\nMAE = {mae_ret:.4f}\nSamples = {len(return_predictions)}'
+        ax1.text(0.05, 0.95, stats_text, transform=ax1.transAxes, fontsize=10,
+                bbox=dict(boxstyle='round', facecolor='white', alpha=0.8), verticalalignment='top')
+        
+        # Plot 2: Price Predictions vs Actuals (Scatter)
+        ax2 = axes[0, 1]
+        ax2.scatter(actual_prices, predicted_prices, alpha=0.7, s=50, color='green', edgecolors='darkgreen')
+        
+        # Perfect prediction line
+        min_price = min(min(actual_prices), min(predicted_prices))
+        max_price = max(max(actual_prices), max(predicted_prices))
+        ax2.plot([min_price, max_price], [min_price, max_price], 'r--', lw=2, alpha=0.8, label='Perfect Prediction')
+        
+        ax2.set_xlabel('Actual Prices ($)')
+        ax2.set_ylabel('Predicted Prices ($)')
+        ax2.set_title(f'{first_model.replace(" Predictor", "")} - Price Predictions')
+        ax2.grid(True, alpha=0.3)
+        ax2.legend()
+        
+        # Add statistics
+        r2_price = np.corrcoef(actual_prices, predicted_prices)[0, 1] ** 2
+        mae_price = np.mean(np.abs(np.array(predicted_prices) - np.array(actual_prices)))
+        stats_text = f'R² = {r2_price:.3f}\nMAE = ${mae_price:.2f}\nPrice Range = ${min_price:.1f}-${max_price:.1f}'
+        ax2.text(0.05, 0.95, stats_text, transform=ax2.transAxes, fontsize=10,
+                bbox=dict(boxstyle='round', facecolor='white', alpha=0.8), verticalalignment='top')
+        
+        # Plot 3: Return Time Series
+        ax3 = axes[1, 0]
+        time_indices = range(len(return_predictions))
+        
+        ax3.plot(time_indices, return_actuals, 'o-', color='green', alpha=0.8, label='Actual Returns', markersize=5, linewidth=2)
+        ax3.plot(time_indices, return_predictions, 's-', color='red', alpha=0.8, label='Predicted Returns', markersize=5, linewidth=2)
+        
+        ax3.set_xlabel('Time Index (Days)')
+        ax3.set_ylabel('Log Returns')
+        ax3.set_title('Return Predictions Over Time')
+        ax3.grid(True, alpha=0.3)
+        ax3.legend()
+        ax3.axhline(y=0, color='black', linestyle='-', alpha=0.3)
+        
+        # Plot 4: Price Time Series
+        ax4 = axes[1, 1]
+        
+        ax4.plot(time_indices, actual_prices, 'o-', color='green', alpha=0.8, label='Actual Prices', markersize=5, linewidth=2)
+        ax4.plot(time_indices, predicted_prices, 's-', color='red', alpha=0.8, label='Predicted Prices', markersize=5, linewidth=2)
+        
+        ax4.set_xlabel('Time Index (Days)')
+        ax4.set_ylabel('Price ($)')
+        ax4.set_title('Price Predictions Over Time')
+        ax4.grid(True, alpha=0.3)
+        ax4.legend()
+        
+        # Plot 5: Prediction Errors Over Time
+        ax5 = axes[2, 0]
+        return_errors = np.array(return_predictions) - np.array(return_actuals)
+        price_errors = np.array(predicted_prices) - np.array(actual_prices)
+        
+        ax5.plot(time_indices, return_errors, 'o-', color='purple', alpha=0.7, label='Return Errors', markersize=4)
+        ax5.set_xlabel('Time Index (Days)')
+        ax5.set_ylabel('Prediction Error (Returns)')
+        ax5.set_title('Return Prediction Errors Over Time')
+        ax5.grid(True, alpha=0.3)
+        ax5.axhline(y=0, color='black', linestyle='-', alpha=0.5)
+        ax5.legend()
+        
+        # Add error statistics
+        mean_error = np.mean(return_errors)
+        std_error = np.std(return_errors)
+        ax5.text(0.05, 0.95, f'Mean Error: {mean_error:+.4f}\nStd Error: {std_error:.4f}', 
+                transform=ax5.transAxes, fontsize=10,
+                bbox=dict(boxstyle='round', facecolor='white', alpha=0.8), verticalalignment='top')
+        
+        # Plot 6: Price Prediction Errors Over Time
+        ax6 = axes[2, 1]
+        
+        ax6.plot(time_indices, price_errors, 'o-', color='orange', alpha=0.7, label='Price Errors', markersize=4)
+        ax6.set_xlabel('Time Index (Days)')
+        ax6.set_ylabel('Prediction Error ($)')
+        ax6.set_title('Price Prediction Errors Over Time')
+        ax6.grid(True, alpha=0.3)
+        ax6.axhline(y=0, color='black', linestyle='-', alpha=0.5)
+        ax6.legend()
+        
+        # Add error statistics
+        mean_price_error = np.mean(price_errors)
+        std_price_error = np.std(price_errors)
+        ax6.text(0.05, 0.95, f'Mean Error: ${mean_price_error:+.2f}\nStd Error: ${std_price_error:.2f}', 
+                transform=ax6.transAxes, fontsize=10,
+                bbox=dict(boxstyle='round', facecolor='white', alpha=0.8), verticalalignment='top')
+        
+        plt.tight_layout()
+        plt.savefig('data/results/visualizations/detailed_predictions_vs_actuals.png', dpi=300, bbox_inches='tight')
+        plt.show()
+        
+        # Create a summary table showing actual values
+        print("\n" + "="*80)
+        print("📊 DETAILED PREDICTION VS ACTUAL VALUES")
+        print("="*80)
+        print(f"Model: {first_model}")
+        print(f"Total Predictions: {len(return_predictions)}")
+        print("\nSample of Predictions vs Actuals (First 10 days):")
+        print("-" * 80)
+        print(f"{'Day':<4} {'Actual Return':<15} {'Pred Return':<15} {'Actual Price':<12} {'Pred Price':<12} {'Price Error':<12}")
+        print("-" * 80)
+        
+        for i in range(min(10, len(return_predictions))):
+            day = i + 1
+            actual_ret = return_actuals[i]
+            pred_ret = return_predictions[i]
+            actual_price = actual_prices[i]
+            pred_price = predicted_prices[i]
+            price_error = pred_price - actual_price
+            
+            print(f"{day:<4} {actual_ret:<15.4f} {pred_ret:<15.4f} ${actual_price:<11.2f} ${pred_price:<11.2f} ${price_error:<11.2f}")
+        
+        print("-" * 80)
+        print(f"Return MAE: {mae_ret:.4f}")
+        print(f"Price MAE: ${mae_price:.2f}")
+        print(f"Return R²: {r2_ret:.3f}")
+        print(f"Price R²: {r2_price:.3f}")
+        print("="*80)
+    
+    def _create_time_series_prediction_plots(self, prediction_data: Dict) -> None:
+        """Create time series plots showing prediction accuracy over time"""
+        print("📈 Creating time series prediction accuracy plots...")
+        
+        # Create a comprehensive time series plot for all models and targets
+        fig, axes = plt.subplots(2, 2, figsize=(20, 12))
+        fig.suptitle('Time Series Prediction Analysis', fontsize=16, fontweight='bold')
+        
+        # Collect all data for analysis
+        all_errors = {}
+        all_accuracies = {}
+        
+        for model_name, model_targets in prediction_data.items():
+            for target_type, data in model_targets.items():
+                predictions = data['predictions']
+                actuals = data['actuals']
+                
+                key = f"{model_name.replace(' Predictor', '')} - {target_type}"
+                
+                # Calculate errors over time
+                errors = np.abs(predictions - actuals)
+                all_errors[key] = errors
+                
+                # Calculate rolling accuracy (correlation over windows)
+                window_size = min(10, len(predictions) // 3)
+                if len(predictions) >= window_size:
+                    rolling_corr = []
+                    for i in range(window_size, len(predictions)):
+                        window_pred = predictions[i-window_size:i]
+                        window_actual = actuals[i-window_size:i]
+                        if np.std(window_pred) > 0 and np.std(window_actual) > 0:
+                            corr = np.corrcoef(window_pred, window_actual)[0, 1]
+                            rolling_corr.append(corr)
+                        else:
+                            rolling_corr.append(0)
+                    all_accuracies[key] = rolling_corr
+        
+        # Plot 1: Error over time for different models/targets
+        ax1 = axes[0, 0]
+        colors = sns.color_palette("husl", len(all_errors))
+        for i, (key, errors) in enumerate(list(all_errors.items())[:5]):  # Show first 5
+            ax1.plot(errors, color=colors[i], alpha=0.7, label=key, linewidth=1.5)
+        
+        ax1.set_xlabel('Time Index')
+        ax1.set_ylabel('Absolute Error')
+        ax1.set_title('Prediction Error Over Time')
+        ax1.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+        ax1.grid(True, alpha=0.3)
+        
+        # Plot 2: Rolling correlation over time
+        ax2 = axes[0, 1]
+        for i, (key, accuracies) in enumerate(list(all_accuracies.items())[:5]):  # Show first 5
+            if accuracies:
+                ax2.plot(accuracies, color=colors[i], alpha=0.7, label=key, linewidth=1.5)
+        
+        ax2.set_xlabel('Time Index')
+        ax2.set_ylabel('Rolling Correlation')
+        ax2.set_title('Prediction Accuracy Over Time')
+        ax2.axhline(y=0, color='black', linestyle='--', alpha=0.5)
+        ax2.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+        ax2.grid(True, alpha=0.3)
+        
+        # Plot 3: Error distribution comparison
+        ax3 = axes[1, 0]
+        error_data = [errors for errors in list(all_errors.values())[:5]]
+        error_labels = [key.split(' - ')[0] for key in list(all_errors.keys())[:5]]
+        
+        if error_data:
+            ax3.boxplot(error_data, labels=error_labels)
+            ax3.set_ylabel('Absolute Error')
+            ax3.set_title('Error Distribution by Model')
+            ax3.tick_params(axis='x', rotation=45)
+            ax3.grid(True, alpha=0.3)
+        
+        # Plot 4: Prediction vs Actual correlation summary
+        ax4 = axes[1, 1]
+        correlations = []
+        model_labels = []
+        
+        for model_name, model_targets in prediction_data.items():
+            model_corrs = []
+            for target_type, data in model_targets.items():
+                corr = np.corrcoef(data['predictions'], data['actuals'])[0, 1]
+                model_corrs.append(corr)
+            
+            if model_corrs:
+                correlations.append(np.mean(model_corrs))
+                model_labels.append(model_name.replace(' Predictor', ''))
+        
+        if correlations:
+            bars = ax4.bar(model_labels, correlations, color=sns.color_palette("viridis", len(correlations)))
+            ax4.set_ylabel('Average Correlation')
+            ax4.set_title('Model Prediction Correlation Summary')
+            ax4.tick_params(axis='x', rotation=45)
+            ax4.grid(True, alpha=0.3)
+            
+            # Add value labels
+            for bar, corr in zip(bars, correlations):
+                ax4.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.01,
+                        f'{corr:.3f}', ha='center', va='bottom', fontsize=9)
+        
+        plt.tight_layout()
+        plt.savefig('data/results/visualizations/time_series_prediction_analysis.png', dpi=300, bbox_inches='tight')
         plt.show()
     
     def create_prediction_analysis(self) -> None:

@@ -528,7 +528,9 @@ class UnifiedTargetManager:
             'primary_target': self.primary_target,
             'secondary_targets': self.secondary_targets,
             'returns_type': self.returns_type,
-            'target_names': ['target_' + self.primary_target] + ['target_' + t for t in self.secondary_targets]
+            'target_names': ['target_' + self.primary_target] + ['target_' + t for t in self.secondary_targets],
+            'save_all_predictions': True,  # Enable saving predictions for all targets
+            'prediction_targets': [self.primary_target] + self.secondary_targets
         }
         
         # Add model-specific configurations
@@ -553,6 +555,72 @@ class UnifiedTargetManager:
             })
         
         return base_config
+    
+    def save_predictions_for_all_targets(self, model_predictions: Dict, actual_targets: Dict, 
+                                       model_name: str, results_dict: Dict) -> Dict:
+        """
+        Save predictions and actuals for all target types
+        
+        Args:
+            model_predictions: Dictionary with model predictions for each target
+            actual_targets: Dictionary with actual values for each target
+            model_name: Name of the model
+            results_dict: Existing results dictionary to update
+            
+        Returns:
+            Updated results dictionary with all target predictions
+        """
+        if 'predictions' not in results_dict:
+            results_dict['predictions'] = {}
+        
+        # Save predictions for each target type
+        for target_type in [self.primary_target] + self.secondary_targets:
+            target_key = f'target_{target_type}'
+            
+            if target_key in model_predictions and target_key in actual_targets:
+                # Convert to lists for JSON serialization
+                predictions = model_predictions[target_key]
+                actuals = actual_targets[target_key]
+                
+                if hasattr(predictions, 'tolist'):
+                    predictions = predictions.tolist()
+                if hasattr(actuals, 'tolist'):
+                    actuals = actuals.tolist()
+                
+                # Save predictions and actuals for this target
+                results_dict['predictions'][f'{target_type}_predictions'] = predictions
+                results_dict['predictions'][f'{target_type}_actuals'] = actuals
+                
+                # Calculate target-specific metrics
+                if hasattr(predictions, '__len__') and hasattr(actuals, '__len__'):
+                    import numpy as np
+                    pred_array = np.array(predictions).flatten()
+                    actual_array = np.array(actuals).flatten()
+                    
+                    if len(pred_array) == len(actual_array) and len(pred_array) > 0:
+                        mae = np.mean(np.abs(pred_array - actual_array))
+                        rmse = np.sqrt(np.mean((pred_array - actual_array) ** 2))
+                        bias = np.mean(pred_array - actual_array)
+                        
+                        # Directional accuracy for continuous targets
+                        if len(pred_array) > 1:
+                            pred_direction = np.diff(pred_array) > 0
+                            actual_direction = np.diff(actual_array) > 0
+                            dir_accuracy = np.mean(pred_direction == actual_direction) if len(pred_direction) > 0 else 0
+                        else:
+                            dir_accuracy = 0
+                        
+                        # Save target-specific metrics
+                        target_metrics_key = f'{target_type}_metrics'
+                        results_dict[target_metrics_key] = {
+                            'mae': float(mae),
+                            'rmse': float(rmse),
+                            'bias': float(bias),
+                            'directional_accuracy': float(dir_accuracy),
+                            'prediction_count': len(pred_array)
+                        }
+        
+        return results_dict
     
     def print_unified_target_info(self):
         """Print comprehensive information about unified targets"""
