@@ -683,12 +683,18 @@ class ModelPerformanceVisualizer:
         plt.show()
     
     def _create_detailed_prediction_vs_actual_plots(self, prediction_data: Dict) -> None:
-        """Create detailed prediction vs actual plots showing actual price and return values"""
-        print("📊 Creating detailed prediction vs actual value plots with price conversions...")
+        """Create detailed candlestick charts showing predicted vs actual OHLC prices"""
+        print("📊 Creating candlestick charts with predicted vs actual prices...")
         
-        # Create comprehensive plots showing both returns and converted prices
-        fig, axes = plt.subplots(3, 2, figsize=(20, 18))
-        fig.suptitle('Detailed Predictions vs Actuals: Returns and Price Analysis', fontsize=16, fontweight='bold')
+        # Load OHLC data
+        try:
+            import pandas as pd
+            ohlc_data = pd.read_csv('data/NVDA_data.csv')
+            ohlc_data['datetime'] = pd.to_datetime(ohlc_data['datetime'])
+            ohlc_data = ohlc_data.sort_values('datetime')
+        except FileNotFoundError:
+            print("❌ NVDA_data.csv not found, cannot create candlestick charts")
+            return
         
         # Get the first model with data for demonstration
         model_names = list(prediction_data.keys())
@@ -703,164 +709,197 @@ class ModelPerformanceVisualizer:
         return_predictions = data['predictions']
         return_actuals = data['actuals']
         
-        # Assume starting price of $150 for NVDA (approximate current price)
-        starting_price = 150.0
+        # Get the test period data (last 50 days)
+        test_data = ohlc_data.tail(len(return_predictions)).copy()
+        test_data = test_data.reset_index(drop=True)
         
-        # Convert log returns to prices
-        predicted_prices = [starting_price]
-        actual_prices = [starting_price]
+        # Convert return predictions to predicted close prices
+        predicted_closes = []
+        actual_closes = test_data['close'].values
         
         for i in range(len(return_predictions)):
-            # Convert log returns to price changes
-            pred_price = predicted_prices[-1] * np.exp(return_predictions[i])
-            actual_price = actual_prices[-1] * np.exp(return_actuals[i])
+            if i == 0:
+                # Use previous day's close as starting point
+                prev_close = ohlc_data.iloc[-(len(return_predictions)+1)]['close']
+            else:
+                prev_close = actual_closes[i-1]
             
-            predicted_prices.append(pred_price)
-            actual_prices.append(actual_price)
+            # Convert log return prediction to predicted close price
+            predicted_close = prev_close * np.exp(return_predictions[i])
+            predicted_closes.append(predicted_close)
         
-        # Remove the starting price for alignment
-        predicted_prices = predicted_prices[1:]
-        actual_prices = actual_prices[1:]
+        predicted_closes = np.array(predicted_closes)
         
-        # Plot 1: Return Predictions vs Actuals (Scatter)
+        # Create candlestick charts
+        fig, axes = plt.subplots(2, 2, figsize=(20, 16))
+        fig.suptitle(f'NVDA Candlestick Analysis: {first_model.replace(" Predictor", "")}', fontsize=16, fontweight='bold')
+        
+        # Plot 1: Actual OHLC Candlestick Chart
         ax1 = axes[0, 0]
-        ax1.scatter(return_actuals, return_predictions, alpha=0.7, s=50, color='blue', edgecolors='darkblue')
+        self._plot_candlesticks(ax1, test_data, 'Actual OHLC Prices', 'green', 'red')
         
-        # Perfect prediction line
-        min_ret = min(min(return_actuals), min(return_predictions))
-        max_ret = max(max(return_actuals), max(return_predictions))
-        ax1.plot([min_ret, max_ret], [min_ret, max_ret], 'r--', lw=2, alpha=0.8, label='Perfect Prediction')
-        
-        ax1.set_xlabel('Actual Returns (Log Returns)')
-        ax1.set_ylabel('Predicted Returns (Log Returns)')
-        ax1.set_title(f'{first_model.replace(" Predictor", "")} - Return Predictions')
-        ax1.grid(True, alpha=0.3)
-        ax1.legend()
-        
-        # Add statistics
-        r2_ret = np.corrcoef(return_actuals, return_predictions)[0, 1] ** 2
-        mae_ret = np.mean(np.abs(return_predictions - return_actuals))
-        stats_text = f'R² = {r2_ret:.3f}\nMAE = {mae_ret:.4f}\nSamples = {len(return_predictions)}'
-        ax1.text(0.05, 0.95, stats_text, transform=ax1.transAxes, fontsize=10,
-                bbox=dict(boxstyle='round', facecolor='white', alpha=0.8), verticalalignment='top')
-        
-        # Plot 2: Price Predictions vs Actuals (Scatter)
+        # Plot 2: Predicted vs Actual Close Prices
         ax2 = axes[0, 1]
-        ax2.scatter(actual_prices, predicted_prices, alpha=0.7, s=50, color='green', edgecolors='darkgreen')
+        time_indices = range(len(predicted_closes))
         
-        # Perfect prediction line
-        min_price = min(min(actual_prices), min(predicted_prices))
-        max_price = max(max(actual_prices), max(predicted_prices))
-        ax2.plot([min_price, max_price], [min_price, max_price], 'r--', lw=2, alpha=0.8, label='Perfect Prediction')
+        ax2.plot(time_indices, actual_closes, 'o-', color='green', alpha=0.8, 
+                label='Actual Close', markersize=6, linewidth=2)
+        ax2.plot(time_indices, predicted_closes, 's-', color='red', alpha=0.8, 
+                label='Predicted Close', markersize=6, linewidth=2)
         
-        ax2.set_xlabel('Actual Prices ($)')
-        ax2.set_ylabel('Predicted Prices ($)')
-        ax2.set_title(f'{first_model.replace(" Predictor", "")} - Price Predictions')
+        ax2.set_xlabel('Trading Days')
+        ax2.set_ylabel('Price ($)')
+        ax2.set_title('Predicted vs Actual Close Prices')
         ax2.grid(True, alpha=0.3)
         ax2.legend()
         
         # Add statistics
-        r2_price = np.corrcoef(actual_prices, predicted_prices)[0, 1] ** 2
-        mae_price = np.mean(np.abs(np.array(predicted_prices) - np.array(actual_prices)))
-        stats_text = f'R² = {r2_price:.3f}\nMAE = ${mae_price:.2f}\nPrice Range = ${min_price:.1f}-${max_price:.1f}'
-        ax2.text(0.05, 0.95, stats_text, transform=ax2.transAxes, fontsize=10,
+        r2_price = np.corrcoef(actual_closes, predicted_closes)[0, 1] ** 2
+        mae_price = np.mean(np.abs(predicted_closes - actual_closes))
+        rmse_price = np.sqrt(np.mean((predicted_closes - actual_closes) ** 2))
+        
+        stats_text = f'R² = {r2_price:.3f}\nMAE = ${mae_price:.2f}\nRMSE = ${rmse_price:.2f}'
+        ax2.text(0.05, 0.95, stats_text, transform=ax2.transAxes, fontsize=11,
                 bbox=dict(boxstyle='round', facecolor='white', alpha=0.8), verticalalignment='top')
         
-        # Plot 3: Return Time Series
+        # Plot 3: Prediction Errors with Candlesticks
         ax3 = axes[1, 0]
-        time_indices = range(len(return_predictions))
+        price_errors = predicted_closes - actual_closes
         
-        ax3.plot(time_indices, return_actuals, 'o-', color='green', alpha=0.8, label='Actual Returns', markersize=5, linewidth=2)
-        ax3.plot(time_indices, return_predictions, 's-', color='red', alpha=0.8, label='Predicted Returns', markersize=5, linewidth=2)
+        # Create error bars on candlestick chart
+        for i in range(len(test_data)):
+            open_price = test_data.iloc[i]['open']
+            high_price = test_data.iloc[i]['high']
+            low_price = test_data.iloc[i]['low']
+            close_price = test_data.iloc[i]['close']
+            
+            # Candlestick body
+            color = 'green' if close_price >= open_price else 'red'
+            body_height = abs(close_price - open_price)
+            body_bottom = min(open_price, close_price)
+            
+            # Draw candlestick
+            ax3.plot([i, i], [low_price, high_price], color='black', linewidth=1)
+            ax3.add_patch(plt.Rectangle((i-0.3, body_bottom), 0.6, body_height, 
+                                      facecolor=color, alpha=0.7, edgecolor='black'))
+            
+            # Add prediction error as a marker
+            error_color = 'blue' if price_errors[i] > 0 else 'orange'
+            ax3.scatter(i, predicted_closes[i], color=error_color, s=50, alpha=0.8, 
+                       marker='D', label='Predicted' if i == 0 else "")
         
-        ax3.set_xlabel('Time Index (Days)')
-        ax3.set_ylabel('Log Returns')
-        ax3.set_title('Return Predictions Over Time')
+        ax3.set_xlabel('Trading Days')
+        ax3.set_ylabel('Price ($)')
+        ax3.set_title('Candlesticks with Prediction Points')
         ax3.grid(True, alpha=0.3)
         ax3.legend()
-        ax3.axhline(y=0, color='black', linestyle='-', alpha=0.3)
         
-        # Plot 4: Price Time Series
+        # Plot 4: Price Prediction Accuracy Over Time
         ax4 = axes[1, 1]
         
-        ax4.plot(time_indices, actual_prices, 'o-', color='green', alpha=0.8, label='Actual Prices', markersize=5, linewidth=2)
-        ax4.plot(time_indices, predicted_prices, 's-', color='red', alpha=0.8, label='Predicted Prices', markersize=5, linewidth=2)
+        # Calculate rolling accuracy metrics
+        window_size = min(10, len(predicted_closes) // 3)
+        rolling_mae = []
+        rolling_r2 = []
         
-        ax4.set_xlabel('Time Index (Days)')
-        ax4.set_ylabel('Price ($)')
-        ax4.set_title('Price Predictions Over Time')
+        for i in range(window_size, len(predicted_closes)):
+            window_pred = predicted_closes[i-window_size:i]
+            window_actual = actual_closes[i-window_size:i]
+            
+            mae = np.mean(np.abs(window_pred - window_actual))
+            r2 = np.corrcoef(window_pred, window_actual)[0, 1] ** 2 if np.std(window_pred) > 0 else 0
+            
+            rolling_mae.append(mae)
+            rolling_r2.append(r2)
+        
+        ax4_twin = ax4.twinx()
+        
+        line1 = ax4.plot(range(window_size, len(predicted_closes)), rolling_mae, 
+                        'b-', alpha=0.7, linewidth=2, label='Rolling MAE')
+        line2 = ax4_twin.plot(range(window_size, len(predicted_closes)), rolling_r2, 
+                             'r-', alpha=0.7, linewidth=2, label='Rolling R²')
+        
+        ax4.set_xlabel('Trading Days')
+        ax4.set_ylabel('Rolling MAE ($)', color='blue')
+        ax4_twin.set_ylabel('Rolling R²', color='red')
+        ax4.set_title('Prediction Accuracy Over Time')
         ax4.grid(True, alpha=0.3)
-        ax4.legend()
         
-        # Plot 5: Prediction Errors Over Time
-        ax5 = axes[2, 0]
-        return_errors = np.array(return_predictions) - np.array(return_actuals)
-        price_errors = np.array(predicted_prices) - np.array(actual_prices)
-        
-        ax5.plot(time_indices, return_errors, 'o-', color='purple', alpha=0.7, label='Return Errors', markersize=4)
-        ax5.set_xlabel('Time Index (Days)')
-        ax5.set_ylabel('Prediction Error (Returns)')
-        ax5.set_title('Return Prediction Errors Over Time')
-        ax5.grid(True, alpha=0.3)
-        ax5.axhline(y=0, color='black', linestyle='-', alpha=0.5)
-        ax5.legend()
-        
-        # Add error statistics
-        mean_error = np.mean(return_errors)
-        std_error = np.std(return_errors)
-        ax5.text(0.05, 0.95, f'Mean Error: {mean_error:+.4f}\nStd Error: {std_error:.4f}', 
-                transform=ax5.transAxes, fontsize=10,
-                bbox=dict(boxstyle='round', facecolor='white', alpha=0.8), verticalalignment='top')
-        
-        # Plot 6: Price Prediction Errors Over Time
-        ax6 = axes[2, 1]
-        
-        ax6.plot(time_indices, price_errors, 'o-', color='orange', alpha=0.7, label='Price Errors', markersize=4)
-        ax6.set_xlabel('Time Index (Days)')
-        ax6.set_ylabel('Prediction Error ($)')
-        ax6.set_title('Price Prediction Errors Over Time')
-        ax6.grid(True, alpha=0.3)
-        ax6.axhline(y=0, color='black', linestyle='-', alpha=0.5)
-        ax6.legend()
-        
-        # Add error statistics
-        mean_price_error = np.mean(price_errors)
-        std_price_error = np.std(price_errors)
-        ax6.text(0.05, 0.95, f'Mean Error: ${mean_price_error:+.2f}\nStd Error: ${std_price_error:.2f}', 
-                transform=ax6.transAxes, fontsize=10,
-                bbox=dict(boxstyle='round', facecolor='white', alpha=0.8), verticalalignment='top')
+        # Combine legends
+        lines = line1 + line2
+        labels = [l.get_label() for l in lines]
+        ax4.legend(lines, labels, loc='upper left')
         
         plt.tight_layout()
-        plt.savefig('data/results/visualizations/detailed_predictions_vs_actuals.png', dpi=300, bbox_inches='tight')
+        plt.savefig('data/results/visualizations/candlestick_predictions.png', dpi=300, bbox_inches='tight')
         plt.show()
         
-        # Create a summary table showing actual values
-        print("\n" + "="*80)
-        print("📊 DETAILED PREDICTION VS ACTUAL VALUES")
-        print("="*80)
+        # Print detailed prediction analysis
+        print("\n" + "="*90)
+        print("📊 CANDLESTICK PREDICTION ANALYSIS")
+        print("="*90)
         print(f"Model: {first_model}")
-        print(f"Total Predictions: {len(return_predictions)}")
-        print("\nSample of Predictions vs Actuals (First 10 days):")
-        print("-" * 80)
-        print(f"{'Day':<4} {'Actual Return':<15} {'Pred Return':<15} {'Actual Price':<12} {'Pred Price':<12} {'Price Error':<12}")
-        print("-" * 80)
+        print(f"Total Trading Days: {len(predicted_closes)}")
+        print(f"Price Range: ${actual_closes.min():.2f} - ${actual_closes.max():.2f}")
+        print()
+        print("Sample of OHLC vs Predicted Close (First 10 days):")
+        print("-" * 90)
+        print(f"{'Day':<4} {'Date':<12} {'Open':<8} {'High':<8} {'Low':<8} {'Actual':<8} {'Predicted':<10} {'Error':<8}")
+        print("-" * 90)
         
-        for i in range(min(10, len(return_predictions))):
+        for i in range(min(10, len(predicted_closes))):
             day = i + 1
-            actual_ret = return_actuals[i]
-            pred_ret = return_predictions[i]
-            actual_price = actual_prices[i]
-            pred_price = predicted_prices[i]
-            price_error = pred_price - actual_price
+            date = test_data.iloc[i]['datetime'].strftime('%m/%d')
+            open_price = test_data.iloc[i]['open']
+            high_price = test_data.iloc[i]['high']
+            low_price = test_data.iloc[i]['low']
+            actual_close = actual_closes[i]
+            pred_close = predicted_closes[i]
+            error = pred_close - actual_close
             
-            print(f"{day:<4} {actual_ret:<15.4f} {pred_ret:<15.4f} ${actual_price:<11.2f} ${pred_price:<11.2f} ${price_error:<11.2f}")
+            print(f"{day:<4} {date:<12} ${open_price:<7.2f} ${high_price:<7.2f} ${low_price:<7.2f} "
+                  f"${actual_close:<7.2f} ${pred_close:<9.2f} ${error:<7.2f}")
         
-        print("-" * 80)
-        print(f"Return MAE: {mae_ret:.4f}")
-        print(f"Price MAE: ${mae_price:.2f}")
-        print(f"Return R²: {r2_ret:.3f}")
-        print(f"Price R²: {r2_price:.3f}")
-        print("="*80)
+        print("-" * 90)
+        print(f"Overall Statistics:")
+        print(f"  Price MAE: ${mae_price:.2f}")
+        print(f"  Price RMSE: ${rmse_price:.2f}")
+        print(f"  Price R²: {r2_price:.3f}")
+        print(f"  Mean Error: ${np.mean(price_errors):+.2f}")
+        print(f"  Std Error: ${np.std(price_errors):.2f}")
+        
+        # Directional accuracy
+        actual_direction = np.diff(actual_closes) > 0
+        pred_direction = np.diff(predicted_closes) > 0
+        dir_accuracy = np.mean(actual_direction == pred_direction) * 100
+        print(f"  Directional Accuracy: {dir_accuracy:.1f}%")
+        print("="*90)
+    
+    def _plot_candlesticks(self, ax, data, title, up_color='green', down_color='red'):
+        """Helper function to plot candlestick chart"""
+        for i in range(len(data)):
+            open_price = data.iloc[i]['open']
+            high_price = data.iloc[i]['high']
+            low_price = data.iloc[i]['low']
+            close_price = data.iloc[i]['close']
+            
+            # Determine color
+            color = up_color if close_price >= open_price else down_color
+            
+            # Draw high-low line
+            ax.plot([i, i], [low_price, high_price], color='black', linewidth=1)
+            
+            # Draw open-close body
+            body_height = abs(close_price - open_price)
+            body_bottom = min(open_price, close_price)
+            
+            ax.add_patch(plt.Rectangle((i-0.3, body_bottom), 0.6, body_height, 
+                                     facecolor=color, alpha=0.7, edgecolor='black'))
+        
+        ax.set_xlabel('Trading Days')
+        ax.set_ylabel('Price ($)')
+        ax.set_title(title)
+        ax.grid(True, alpha=0.3)
     
     def _create_time_series_prediction_plots(self, prediction_data: Dict) -> None:
         """Create time series plots showing prediction accuracy over time"""
@@ -1010,6 +1049,7 @@ class ModelPerformanceVisualizer:
             return
         
         # Create comprehensive prediction analysis
+        self._create_detailed_prediction_vs_actual_plots(prediction_data)
         self._create_multi_target_prediction_plots(prediction_data)
         self._create_prediction_accuracy_heatmap(prediction_data)
         self._create_prediction_error_distribution(prediction_data)
