@@ -60,45 +60,46 @@ sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..'))
 from src.data_processing.unified_preprocessing import UnifiedPreprocessor
 from src.data_processing.unified_targets import UnifiedTargetManager
 
-# Import our improved evaluation functions
-try:
-    from src.evaluation.stock_evaluation_metrics import (
-        comprehensive_model_evaluation, 
-        compare_models_comprehensive,
-        calculate_bias_corrected_metrics,
-        calculate_directional_accuracy
-    )
-except ImportError:
-    print("Warning: Could not import evaluation metrics. Some features may be limited.")
-    # Define minimal fallback functions
-    def comprehensive_model_evaluation(model, X_test, y_test, scaler_y, model_name, train_test_mean_diff=0):
-        model.eval()
-        with torch.no_grad():
-            predictions = model(X_test)
-        
-        # Convert back to original scale
-        predictions_orig = scaler_y.inverse_transform(predictions.numpy())
-        y_test_orig = scaler_y.inverse_transform(y_test.numpy())
-        
-        # Basic metrics
-        mae = np.mean(np.abs(predictions_orig - y_test_orig))
-        mse = np.mean((predictions_orig - y_test_orig) ** 2)
-        rmse = np.sqrt(mse)
-        
-        return {
-            'mae': mae,
-            'mse': mse, 
-            'rmse': rmse,
-            'predictions': predictions_orig,
-            'actuals': y_test_orig,
-            'bias_metrics': {'bias': np.mean(predictions_orig - y_test_orig), 'corrected_mae': mae},
-            'directional_accuracy': 0.5  # placeholder
-        }
+# Define evaluation functions (same as other models)
+def comprehensive_model_evaluation(model, X_test, y_test, scaler_y, model_name, train_test_mean_diff=0):
+    model.eval()
+    with torch.no_grad():
+        predictions = model(X_test)
     
-    def compare_models_comprehensive(adaptive_results, standard_results):
-        print(f"\nModel Comparison:")
-        print(f"Adaptive MAE: ${adaptive_results['mae']:.4f}")
-        print(f"Standard MAE: ${standard_results['mae']:.4f}")
+    # Convert back to original scale
+    predictions_orig = scaler_y.inverse_transform(predictions.numpy())
+    y_test_orig = scaler_y.inverse_transform(y_test.numpy())
+    
+    # Basic metrics
+    mae = np.mean(np.abs(predictions_orig - y_test_orig))
+    mse = np.mean((predictions_orig - y_test_orig) ** 2)
+    rmse = np.sqrt(mse)
+    bias = np.mean(predictions_orig - y_test_orig)
+    
+    # Bias-corrected MAE
+    bias_corrected_mae = mae  # For now, same as MAE
+    
+    # Directional accuracy (same calculation as other models)
+    predicted_direction = np.sign(predictions_orig.flatten())
+    actual_direction = np.sign(y_test_orig.flatten())
+    directional_accuracy = np.mean(actual_direction == predicted_direction)
+    
+    return {
+        'mae': mae,
+        'mse': mse, 
+        'rmse': rmse,
+        'bias': bias,
+        'bias_corrected_mae': bias_corrected_mae,
+        'predictions': predictions_orig,
+        'actuals': y_test_orig,
+        'bias_metrics': {'bias': bias, 'corrected_mae': bias_corrected_mae},
+        'directional_accuracy': directional_accuracy
+    }
+
+def compare_models_comprehensive(adaptive_results, standard_results):
+    print(f"\nModel Comparison:")
+    print(f"Adaptive MAE: ${adaptive_results['mae']:.4f}")
+    print(f"Standard MAE: ${standard_results['mae']:.4f}")
 
 class SimplifiedAdaptiveLossFunction(nn.Module):
     """

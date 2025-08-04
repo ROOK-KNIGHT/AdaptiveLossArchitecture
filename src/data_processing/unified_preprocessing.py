@@ -66,8 +66,18 @@ def load_config():
     with open(config_path, 'r') as file:
         return yaml.safe_load(file)
 
+def load_indicators_config():
+    """Load technical indicators configuration from YAML file"""
+    config_path = os.path.join(os.path.dirname(__file__), '..', '..', 'config', 'technical_indicators_config.yaml')
+    if not os.path.exists(config_path):
+        raise FileNotFoundError(f"Technical indicators configuration file not found: {config_path}")
+    
+    with open(config_path, 'r') as file:
+        return yaml.safe_load(file)
+
 # Load global configuration
 CONFIG = load_config()
+INDICATORS_CONFIG = load_indicators_config()
 
 # Import all technical indicator functions
 from .technical_indicators_calculator import (
@@ -266,101 +276,246 @@ class UnifiedPreprocessor:
     
     def calculate_all_technical_indicators(self, df: pd.DataFrame) -> pd.DataFrame:
         """
-        Calculate all technical indicators using the comprehensive calculator
+        Calculate technical indicators based on configuration settings
         """
-        print("Calculating comprehensive technical indicators...")
+        print("Calculating technical indicators based on configuration...")
+        print(f"📋 Using configuration from: config/technical_indicators_config.yaml")
         
         # Make a copy to avoid modifying original
         df_indicators = df.copy()
         
-        # 1. Basic Moving Averages
-        print("  • Moving Averages...")
-        df_indicators['SMA_5'] = calculate_sma(df['close'], 5)
-        df_indicators['SMA_10'] = calculate_sma(df['close'], 10)
-        df_indicators['SMA_20'] = calculate_sma(df['close'], 20)
-        df_indicators['SMA_50'] = calculate_sma(df['close'], 50)
-        df_indicators['SMA_200'] = calculate_sma(df['close'], 200)
+        # Check global settings
+        global_settings = INDICATORS_CONFIG.get('global_settings', {})
         
-        # 2. Exponential Moving Averages
-        df_indicators['EMA_12'] = calculate_ema(df['close'], 12)
-        df_indicators['EMA_26'] = calculate_ema(df['close'], 26)
-        df_indicators['EMA_50'] = calculate_ema(df['close'], 50)
+        # Track enabled indicators
+        enabled_indicators = []
         
-        # 3. Momentum Indicators
-        print("  • Momentum Indicators...")
-        df_indicators['RSI_14'] = calculate_rsi(df['close'], 14)
+        # 1. Trend Indicators
+        if global_settings.get('enable_trend_indicators', False):
+            print("  • Trend Indicators...")
+            trend_indicators = INDICATORS_CONFIG.get('trend_indicators', {})
+            
+            # Simple Moving Averages
+            for indicator_name, config in trend_indicators.items():
+                if config.get('enabled', False) and config.get('function') == 'calculate_sma':
+                    window = config.get('parameters', {}).get('window', 20)
+                    col_name = f"SMA_{window}"
+                    df_indicators[col_name] = calculate_sma(df['close'], window)
+                    enabled_indicators.append(col_name)
+            
+            # Exponential Moving Averages
+            for indicator_name, config in trend_indicators.items():
+                if config.get('enabled', False) and config.get('function') == 'calculate_ema':
+                    window = config.get('parameters', {}).get('window', 12)
+                    col_name = f"EMA_{window}"
+                    df_indicators[col_name] = calculate_ema(df['close'], window)
+                    enabled_indicators.append(col_name)
+            
+            # VWAP
+            if trend_indicators.get('vwap', {}).get('enabled', False):
+                df_indicators['VWAP'] = calculate_vwap(df['high'], df['low'], df['close'], df['volume'])
+                enabled_indicators.append('VWAP')
+            
+            # Parabolic SAR
+            if trend_indicators.get('parabolic_sar', {}).get('enabled', False):
+                df_indicators['PSAR'] = calculate_parabolic_sar(df['high'], df['low'], df['close'])
+                enabled_indicators.append('PSAR')
         
-        # 4. Bollinger Bands
-        bb_upper, bb_lower, bb_middle = calculate_bollinger_bands(df['close'], 20, 2)
-        df_indicators['BB_Upper'] = bb_upper
-        df_indicators['BB_Lower'] = bb_lower
-        df_indicators['BB_Middle'] = bb_middle
-        df_indicators['BB_Width'] = bb_upper - bb_lower
-        df_indicators['BB_Position'] = (df['close'] - bb_lower) / (bb_upper - bb_lower)
+        # 2. Momentum Indicators
+        if global_settings.get('enable_momentum_indicators', False):
+            print("  • Momentum Indicators...")
+            momentum_indicators = INDICATORS_CONFIG.get('momentum_indicators', {})
+            
+            # RSI
+            if momentum_indicators.get('rsi_14', {}).get('enabled', False):
+                df_indicators['RSI_14'] = calculate_rsi(df['close'], 14)
+                enabled_indicators.append('RSI_14')
+            
+            # Stochastic Oscillator
+            if momentum_indicators.get('stochastic_k', {}).get('enabled', False):
+                stoch_k, stoch_d = calculate_stochastic(df['high'], df['low'], df['close'])
+                df_indicators['Stoch_K'] = stoch_k
+                enabled_indicators.append('Stoch_K')
+            
+            if momentum_indicators.get('stochastic_d', {}).get('enabled', False):
+                if 'Stoch_K' not in df_indicators.columns:
+                    stoch_k, stoch_d = calculate_stochastic(df['high'], df['low'], df['close'])
+                    df_indicators['Stoch_K'] = stoch_k
+                df_indicators['Stoch_D'] = stoch_d
+                enabled_indicators.append('Stoch_D')
+            
+            # Williams %R
+            if momentum_indicators.get('williams_r', {}).get('enabled', False):
+                df_indicators['Williams_R'] = calculate_williams_r(df['high'], df['low'], df['close'])
+                enabled_indicators.append('Williams_R')
+            
+            # CCI
+            if momentum_indicators.get('cci', {}).get('enabled', False):
+                df_indicators['CCI'] = calculate_cci(df['high'], df['low'], df['close'])
+                enabled_indicators.append('CCI')
+            
+            # MFI
+            if momentum_indicators.get('mfi', {}).get('enabled', False):
+                df_indicators['MFI'] = calculate_mfi(df['high'], df['low'], df['close'], df['volume'])
+                enabled_indicators.append('MFI')
+            
+            # Momentum
+            if momentum_indicators.get('momentum_10', {}).get('enabled', False):
+                df_indicators['Momentum_10'] = calculate_momentum(df['close'], 10)
+                enabled_indicators.append('Momentum_10')
+            
+            # Rate of Change
+            if momentum_indicators.get('roc_12', {}).get('enabled', False):
+                df_indicators['ROC_12'] = calculate_roc(df['close'], 12)
+                enabled_indicators.append('ROC_12')
         
-        # 5. MACD
-        macd_line, signal_line, histogram = calculate_macd(df['close'])
-        df_indicators['MACD'] = macd_line
-        df_indicators['MACD_Signal'] = signal_line
-        df_indicators['MACD_Histogram'] = histogram
+        # 3. Volume Indicators
+        if global_settings.get('enable_volume_indicators', False):
+            print("  • Volume Indicators...")
+            volume_indicators = INDICATORS_CONFIG.get('volume_indicators', {})
+            
+            # OBV
+            if volume_indicators.get('obv', {}).get('enabled', False):
+                df_indicators['OBV'] = calculate_obv(df['close'], df['volume'])
+                enabled_indicators.append('OBV')
+            
+            # ADL
+            if volume_indicators.get('adl', {}).get('enabled', False):
+                df_indicators['ADL'] = calculate_adl(df['high'], df['low'], df['close'], df['volume'])
+                enabled_indicators.append('ADL')
+            
+            # Volume SMA
+            if volume_indicators.get('volume_sma_20', {}).get('enabled', False):
+                df_indicators['Volume_SMA_20'] = calculate_sma(df['volume'], 20)
+                enabled_indicators.append('Volume_SMA_20')
+            
+            # Volume Ratio
+            if volume_indicators.get('volume_ratio', {}).get('enabled', False):
+                if 'Volume_SMA_20' not in df_indicators.columns:
+                    df_indicators['Volume_SMA_20'] = calculate_sma(df['volume'], 20)
+                df_indicators['Volume_Ratio'] = df['volume'] / df_indicators['Volume_SMA_20']
+                enabled_indicators.append('Volume_Ratio')
         
-        # 6. Stochastic Oscillator
-        stoch_k, stoch_d = calculate_stochastic(df['high'], df['low'], df['close'])
-        df_indicators['Stoch_K'] = stoch_k
-        df_indicators['Stoch_D'] = stoch_d
+        # 4. Volatility Indicators
+        if global_settings.get('enable_volatility_indicators', False):
+            print("  • Volatility Indicators...")
+            volatility_indicators = INDICATORS_CONFIG.get('volatility_indicators', {})
+            
+            # ATR
+            if volatility_indicators.get('atr_14', {}).get('enabled', False):
+                df_indicators['ATR'] = calculate_atr(df['high'], df['low'], df['close'])
+                enabled_indicators.append('ATR')
+            
+            # Historical Volatility
+            if volatility_indicators.get('volatility_20', {}).get('enabled', False):
+                df_indicators['Volatility_20'] = calculate_volatility(df['close'], 20)
+                enabled_indicators.append('Volatility_20')
+            
+            # Bollinger Bands
+            bb_enabled = any(volatility_indicators.get(bb_key, {}).get('enabled', False) 
+                           for bb_key in ['bb_upper', 'bb_lower', 'bb_middle', 'bb_width', 'bb_position'])
+            
+            if bb_enabled:
+                bb_upper, bb_lower, bb_middle = calculate_bollinger_bands(df['close'], 20, 2)
+                
+                if volatility_indicators.get('bb_upper', {}).get('enabled', False):
+                    df_indicators['BB_Upper'] = bb_upper
+                    enabled_indicators.append('BB_Upper')
+                
+                if volatility_indicators.get('bb_lower', {}).get('enabled', False):
+                    df_indicators['BB_Lower'] = bb_lower
+                    enabled_indicators.append('BB_Lower')
+                
+                if volatility_indicators.get('bb_middle', {}).get('enabled', False):
+                    df_indicators['BB_Middle'] = bb_middle
+                    enabled_indicators.append('BB_Middle')
+                
+                if volatility_indicators.get('bb_width', {}).get('enabled', False):
+                    df_indicators['BB_Width'] = bb_upper - bb_lower
+                    enabled_indicators.append('BB_Width')
+                
+                if volatility_indicators.get('bb_position', {}).get('enabled', False):
+                    df_indicators['BB_Position'] = (df['close'] - bb_lower) / (bb_upper - bb_lower)
+                    enabled_indicators.append('BB_Position')
         
-        # 7. Williams %R
-        df_indicators['Williams_R'] = calculate_williams_r(df['high'], df['low'], df['close'])
+        # 5. Signal Indicators
+        if global_settings.get('enable_signal_indicators', False):
+            print("  • Signal Indicators...")
+            signal_indicators = INDICATORS_CONFIG.get('signal_indicators', {})
+            
+            # MACD
+            macd_enabled = any(signal_indicators.get(macd_key, {}).get('enabled', False) 
+                             for macd_key in ['macd_line', 'macd_signal', 'macd_histogram'])
+            
+            if macd_enabled:
+                macd_line, signal_line, histogram = calculate_macd(df['close'])
+                
+                if signal_indicators.get('macd_line', {}).get('enabled', False):
+                    df_indicators['MACD'] = macd_line
+                    enabled_indicators.append('MACD')
+                
+                if signal_indicators.get('macd_signal', {}).get('enabled', False):
+                    df_indicators['MACD_Signal'] = signal_line
+                    enabled_indicators.append('MACD_Signal')
+                
+                if signal_indicators.get('macd_histogram', {}).get('enabled', False):
+                    df_indicators['MACD_Histogram'] = histogram
+                    enabled_indicators.append('MACD_Histogram')
         
-        # 8. Average True Range
-        df_indicators['ATR'] = calculate_atr(df['high'], df['low'], df['close'])
+        # 6. Advanced Indicators
+        if global_settings.get('enable_advanced_indicators', False):
+            print("  • Advanced Indicators...")
+            advanced_indicators = INDICATORS_CONFIG.get('advanced_indicators', {})
+            
+            # Support and Resistance
+            if advanced_indicators.get('support_20', {}).get('enabled', False) or advanced_indicators.get('resistance_20', {}).get('enabled', False):
+                support, resistance = calculate_support_resistance(df['close'], 20)
+                
+                if advanced_indicators.get('support_20', {}).get('enabled', False):
+                    df_indicators['Support_20'] = support
+                    enabled_indicators.append('Support_20')
+                
+                if advanced_indicators.get('resistance_20', {}).get('enabled', False):
+                    df_indicators['Resistance_20'] = resistance
+                    enabled_indicators.append('Resistance_20')
+            
+            # Price Change Indicators
+            if advanced_indicators.get('price_change', {}).get('enabled', False):
+                df_indicators['Price_Change'] = df['close'].diff()
+                enabled_indicators.append('Price_Change')
+            
+            if advanced_indicators.get('price_change_pct', {}).get('enabled', False):
+                df_indicators['Price_Change_Pct'] = df['close'].pct_change() * 100
+                enabled_indicators.append('Price_Change_Pct')
+            
+            # Advanced Volatility Metrics
+            volatility_metrics_enabled = any(advanced_indicators.get(vol_key, {}).get('enabled', False) 
+                                           for vol_key in ['volatility_high_band', 'volatility_low_band', 
+                                                         'high_exceedance', 'low_exceedance', 
+                                                         'position_in_range_pct', 'distance_to_high_pct', 
+                                                         'distance_to_low_pct'])
+            
+            if volatility_metrics_enabled:
+                print("    • Advanced Volatility Metrics...")
+                df_indicators = self._calculate_advanced_volatility_metrics(df_indicators, advanced_indicators)
+                
+                # Add enabled volatility metrics to the list
+                volatility_metric_names = [
+                    'Volatility_High_Band', 'Volatility_Low_Band', 'High_Exceedance', 'Low_Exceedance',
+                    'Distance_To_High_Pct', 'Distance_To_Low_Pct', 'Position_In_Range_Pct',
+                    'Band_Range', 'Band_Midpoint', 'High_Band_Stability', 'Low_Band_Stability',
+                    'Signal_Long', 'Signal_Short', 'Price_Above_High_Band', 'Price_Below_Low_Band',
+                    'Band_Width_Normalized', 'High_Band_Distance_Normalized', 'Low_Band_Distance_Normalized',
+                    'High_Band_SMA_5', 'Low_Band_SMA_5', 'Band_Range_SMA_5', 'High_Band_ROC_5', 'Low_Band_ROC_5'
+                ]
+                enabled_indicators.extend(volatility_metric_names)
         
-        # 9. Commodity Channel Index
-        df_indicators['CCI'] = calculate_cci(df['high'], df['low'], df['close'])
-        
-        # 10. Momentum and Rate of Change
-        df_indicators['Momentum_10'] = calculate_momentum(df['close'], 10)
-        df_indicators['ROC_12'] = calculate_roc(df['close'], 12)
-        
-        # 11. Volume Indicators
-        print("  • Volume Indicators...")
-        df_indicators['OBV'] = calculate_obv(df['close'], df['volume'])
-        df_indicators['ADL'] = calculate_adl(df['high'], df['low'], df['close'], df['volume'])
-        
-        # 12. Volatility
-        df_indicators['Volatility_20'] = calculate_volatility(df['close'], 20)
-        
-        # 13. Support and Resistance
-        support, resistance = calculate_support_resistance(df['close'], 20)
-        df_indicators['Support_20'] = support
-        df_indicators['Resistance_20'] = resistance
-        
-        # 14. VWAP
-        df_indicators['VWAP'] = calculate_vwap(df['high'], df['low'], df['close'], df['volume'])
-        
-        # 15. Money Flow Index
-        df_indicators['MFI'] = calculate_mfi(df['high'], df['low'], df['close'], df['volume'])
-        
-        # 16. Parabolic SAR
-        df_indicators['PSAR'] = calculate_parabolic_sar(df['high'], df['low'], df['close'])
-        
-        # 17. Price Features
-        df_indicators['Price_Change'] = df['close'].diff()
-        df_indicators['Price_Change_Pct'] = df['close'].pct_change() * 100
-        
-        # 18. Volume Features
-        df_indicators['Volume_SMA_20'] = calculate_sma(df['volume'], 20)
-        df_indicators['Volume_Ratio'] = df['volume'] / df_indicators['Volume_SMA_20']
-        
-        # 19. Advanced Volatility Metrics (Your Proprietary Features)
-        print("  • Advanced Volatility Metrics...")
-        df_indicators = self._calculate_advanced_volatility_metrics(df_indicators)
-        
-        print(f"  ✓ Calculated {len(df_indicators.columns) - len(df.columns)} technical indicators")
+        print(f"  ✓ Calculated {len(enabled_indicators)} enabled technical indicators")
+        print(f"  Enabled indicators: {', '.join(enabled_indicators[:10])}{'...' if len(enabled_indicators) > 10 else ''}")
         
         return df_indicators
     
-    def _calculate_advanced_volatility_metrics(self, df: pd.DataFrame) -> pd.DataFrame:
+    def _calculate_advanced_volatility_metrics(self, df: pd.DataFrame, advanced_indicators: dict = None) -> pd.DataFrame:
         """
         Calculate advanced volatility metrics using TechnicalIndicatorsCalculator
         """

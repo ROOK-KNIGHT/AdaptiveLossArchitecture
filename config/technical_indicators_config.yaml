@@ -5,12 +5,12 @@
 # Global Settings
 global_settings:
   # Enable/disable entire indicator categories
-  enable_trend_indicators: true
-  enable_momentum_indicators: true
+  enable_trend_indicators: false
+  enable_momentum_indicators: false
   enable_volume_indicators: true
-  enable_volatility_indicators: true
-  enable_signal_indicators: true
-  enable_advanced_indicators: true
+  enable_volatility_indicators: false
+  enable_signal_indicators: false
+  enable_advanced_indicators: false
   
   # Data requirements
   minimum_data_points: 200  # Minimum data points needed for calculations
@@ -329,7 +329,7 @@ signal_indicators:
 advanced_indicators:
   # Support and Resistance
   support_20:
-    enabled: true
+    enabled: false
     function: "calculate_support_resistance"
     parameters:
       window: 20
@@ -338,7 +338,7 @@ advanced_indicators:
     output_field: "support"
     
   resistance_20:
-    enabled: true
+    enabled: false
     function: "calculate_support_resistance"
     parameters:
       window: 20
@@ -348,14 +348,14 @@ advanced_indicators:
   
   # Price Change Indicators
   price_change:
-    enabled: true
+    enabled: false
     function: "calculate_price_change"
     parameters: {}
     category: "advanced"
     description: "Price Change (Close - Previous Close)"
     
   price_change_pct:
-    enabled: true
+    enabled: false
     function: "calculate_price_change_pct"
     parameters: {}
     category: "advanced"

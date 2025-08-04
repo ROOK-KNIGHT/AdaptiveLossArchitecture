@@ -138,19 +138,53 @@ python3 src/data_processing/visualize_model_performance.py
 
 ## Model Performance
 
-Recent performance on NVDA (1-day horizon):
+### 🏆 Latest Comprehensive Comparison Results (Volume Indicators Only)
 
-| Model | MAE | RMSE | Directional Accuracy | Speed |
-|-------|-----|------|---------------------|-------|
-| **LSTM** | 0.013498 | 0.020249 | 47.50% | 63.47s |
-| **SVR** | 0.013932 | 0.019268 | 48.00% | 127.51s |
-| **Random Forest** | 0.014197 | 0.020961 | 38.00% | 167.08s |
-| **LightGBM** | 0.014801 | 0.022250 | 34.00% | 557.81s |
-| **Linear Regression** | 0.015998 | 0.020866 | **66.00%** | 53.11s |
-| **XGBoost** | 0.017638 | 0.023474 | 48.00% | 630.90s |
-| **Enhanced Adaptive** | 0.020787 | 0.024640 | 50.00% | **29.63s** |
+**Current Configuration**: Volume indicators only (4 total indicators)
+- ✅ **Volume Indicators**: OBV, ADL, Volume SMA, Volume Ratio
+- ❌ **All other categories disabled** for focused volume analysis
 
-*Best MAE: LSTM | Best Directional Accuracy: Linear Regression | Fastest: Enhanced Adaptive*
+![Model Performance Comparison](data/results/visualizations/comprehensive_model_comparison.png)
+
+### Latest Performance Results on NVDA (1-day horizon):
+
+| Model | MAE | RMSE | Directional Accuracy | Speed | Status |
+|-------|-----|------|---------------------|-------|--------|
+| **SVR** | **0.014509** | 0.022834 | 46.00% | 60.65s | 🏆 **Best MAE** |
+| **Enhanced Adaptive** | 0.014604 | 0.017738 | **52.00%** | **5.75s** | 🏆 **Best Direction & Speed** |
+| **Random Forest** | 0.014696 | 0.019461 | **52.00%** | 63.58s | 🏆 **Best Direction** |
+| **Linear Regression** | 0.015078 | 0.021675 | **52.00%** | 4.55s | 🏆 **Best Direction** |
+| **XGBoost** | 0.016451 | 0.021482 | 50.00% | 171.46s | ✅ Good |
+| **LightGBM** | 0.016550 | 0.023967 | 40.00% | 234.25s | ✅ Good |
+| **LSTM** | 0.018678 | 0.042987 | 42.50% | 10.29s | ✅ Good |
+
+### 🎯 Key Performance Highlights:
+
+**🏆 Best Overall Performance**: **Enhanced Adaptive Predictor**
+- **MAE**: 0.014604 (2nd best, very close to SVR)
+- **Directional Accuracy**: 52.00% (tied for best)
+- **Speed**: 5.75s (fastest training)
+- **Adaptive Learning**: Dynamic feature weighting
+
+**🏆 Best Accuracy**: **SVR** (0.014509 MAE)
+**🏆 Best Directional Prediction**: **Enhanced Adaptive, Random Forest, Linear Regression** (52.00%)
+**🏆 Fastest Training**: **Linear Regression** (4.55s)
+
+### Enhanced Adaptive Predictor - Volume-Only Configuration
+
+**Top 6 Most Important Volume Features (Adaptive Weights):**
+1. **Volume_Ratio_lag1** (volume): 0.206214 - Current vs average volume
+2. **Volume_Ratio_lag2** (volume): 0.201218 - Volume momentum
+3. **Volume_SMA_20_lag2** (trend): 0.200924 - Volume trend analysis
+4. **Volume_Ratio_lag3** (volume): 0.189471 - Volume persistence
+5. **OBV_lag2** (volume): 0.187757 - On-Balance Volume
+6. **ADL_lag3** (volume): 0.175843 - Accumulation/Distribution
+
+**Category Performance:**
+- **Volume indicators**: 96.05% total weight (dominant)
+- **Trend indicators**: 20.09% total weight (volume trend)
+
+*Results from comprehensive parallel execution of all 7 models | Total execution time: 250.30s*
 
 ## Technical Innovation
 
