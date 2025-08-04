@@ -225,15 +225,120 @@ class UnifiedTargetManager:
         
         return direction
     
-    def create_targets(self, df: pd.DataFrame) -> Dict[str, pd.Series]:
+    def create_current_returns(self, df: pd.DataFrame) -> pd.Series:
         """
-        Create all configured targets
+        Create current returns for comparison with predictions
         
         Args:
             df: DataFrame with OHLCV data
             
         Returns:
-            Dictionary with all targets
+            Series with current returns
+        """
+        if self.returns_type == 'log_returns':
+            returns = np.log(df['close'] / df['close'].shift(1))
+        elif self.returns_type == 'simple_returns':
+            returns = (df['close'] / df['close'].shift(1)) - 1
+        elif self.returns_type == 'pct_change':
+            returns = df['close'].pct_change()
+        else:
+            raise ValueError(f"Unknown returns type: {self.returns_type}")
+        
+        return returns
+    
+    def create_current_volatility(self, df: pd.DataFrame) -> pd.Series:
+        """
+        Create current volatility for comparison with predictions
+        
+        Args:
+            df: DataFrame with OHLCV data
+            
+        Returns:
+            Series with current volatility
+        """
+        returns = df['close'].pct_change()
+        volatility = returns.rolling(window=self.volatility_window).std()
+        return volatility
+    
+    def create_current_direction(self, df: pd.DataFrame) -> pd.Series:
+        """
+        Create current direction for comparison with predictions
+        
+        Args:
+            df: DataFrame with OHLCV data
+            
+        Returns:
+            Series with current direction
+        """
+        price_change = df['close'] - df['close'].shift(1)
+        direction = (price_change > self.direction_threshold).astype(int)
+        return direction
+    
+    def create_comparison_targets(self, df: pd.DataFrame, targets: Dict[str, pd.Series]) -> Dict[str, pd.Series]:
+        """
+        Create comparison targets for prediction vs. actual analysis
+        
+        Args:
+            df: DataFrame with OHLCV data
+            targets: Dictionary with existing targets
+            
+        Returns:
+            Dictionary with comparison targets
+        """
+        comparison_targets = {}
+        
+        # Create change metrics for each target type
+        for target_name in targets.keys():
+            if target_name.startswith('target_'):
+                target_type = target_name.replace('target_', '')
+                current_name = f'current_{target_type}'
+                
+                if current_name in targets:
+                    target_series = targets[target_name]
+                    current_series = targets[current_name]
+                    
+                    # Calculate absolute change
+                    comparison_targets[f'comparison_abs_change_{target_type}'] = abs(target_series - current_series)
+                    
+                    # Calculate relative change (for non-zero values)
+                    if target_type != 'direction':  # Skip for binary targets
+                        relative_change = abs((target_series - current_series) / (current_series + 1e-8))
+                        comparison_targets[f'comparison_rel_change_{target_type}'] = relative_change
+                    
+                    # Calculate prediction difficulty score
+                    if target_type in ['returns', 'prices', 'volatility']:
+                        volatility = current_series.rolling(window=min(20, len(current_series)//4)).std()
+                        difficulty = abs(target_series - current_series) / (volatility + 1e-8)
+                        comparison_targets[f'comparison_difficulty_{target_type}'] = difficulty
+        
+        # Create market regime indicators
+        if 'current_returns' in targets:
+            returns = targets['current_returns']
+            
+            # Volatility regime (high/low volatility periods)
+            vol_window = min(20, len(returns)//4)
+            rolling_vol = returns.rolling(window=vol_window).std()
+            vol_threshold = rolling_vol.quantile(0.7)
+            comparison_targets['market_regime_high_vol'] = (rolling_vol > vol_threshold).astype(int)
+            
+            # Trend regime (trending/sideways markets)
+            trend_window = min(10, len(returns)//6)
+            rolling_mean = returns.rolling(window=trend_window).mean()
+            trend_strength = abs(rolling_mean) / (rolling_vol + 1e-8)
+            trend_threshold = trend_strength.quantile(0.6)
+            comparison_targets['market_regime_trending'] = (trend_strength > trend_threshold).astype(int)
+        
+        return comparison_targets
+    
+    def create_targets(self, df: pd.DataFrame) -> Dict[str, pd.Series]:
+        """
+        Create all configured targets with enhanced prediction vs. actual analysis
+        
+        Args:
+            df: DataFrame with OHLCV data
+            
+        Returns:
+            Dictionary with all targets including current values for comparison
         """
         print(f"Creating unified targets with {self.target_horizon}-period horizon...")
         
@@ -242,29 +347,43 @@ class UnifiedTargetManager:
         # Always create primary target
         if self.primary_target == 'returns':
             targets['target_returns'] = self.create_returns_target(df)
+            targets['current_returns'] = self.create_current_returns(df)
         elif self.primary_target == 'prices':
             targets['target_prices'] = self.create_prices_target(df)
+            targets['current_prices'] = df['close'].copy()
         elif self.primary_target == 'volatility':
             targets['target_volatility'] = self.create_volatility_target(df)
+            targets['current_volatility'] = self.create_current_volatility(df)
         elif self.primary_target == 'direction':
             targets['target_direction'] = self.create_direction_target(df)
+            targets['current_direction'] = self.create_current_direction(df)
         else:
             raise ValueError(f"Unknown primary target: {self.primary_target}")
         
-        # Create secondary targets
+        # Create secondary targets with current values
         for target_type in self.secondary_targets:
             if target_type == 'returns' and 'target_returns' not in targets:
                 targets['target_returns'] = self.create_returns_target(df)
+                targets['current_returns'] = self.create_current_returns(df)
             elif target_type == 'prices' and 'target_prices' not in targets:
                 targets['target_prices'] = self.create_prices_target(df)
+                targets['current_prices'] = df['close'].copy()
             elif target_type == 'volatility' and 'target_volatility' not in targets:
                 targets['target_volatility'] = self.create_volatility_target(df)
+                targets['current_volatility'] = self.create_current_volatility(df)
             elif target_type == 'direction' and 'target_direction' not in targets:
                 targets['target_direction'] = self.create_direction_target(df)
+                targets['current_direction'] = self.create_current_direction(df)
+        
+        # Create prediction vs. actual comparison targets
+        targets.update(self.create_comparison_targets(df, targets))
         
         # Print target statistics
-        print(f"✓ Created {len(targets)} unified targets:")
+        print(f"✓ Created {len(targets)} unified targets (including comparison targets):")
         for target_name, target_series in targets.items():
+            if target_name.startswith('comparison_') or target_name.startswith('current_'):
+                continue  # Skip detailed stats for comparison targets
+                
             valid_count = target_series.notna().sum()
             if target_series.dtype in ['int64', 'bool']:
                 # Binary target
@@ -274,7 +393,11 @@ class UnifiedTargetManager:
                 # Continuous target
                 mean_val = target_series.mean() if valid_count > 0 else 0
                 std_val = target_series.std() if valid_count > 0 else 0
-                print(f"   {target_name}: {valid_count} valid samples, mean: {mean_val:.6f}, std: {std_val:.6f}")
+                min_val = target_series.min() if valid_count > 0 else 0
+                max_val = target_series.max() if valid_count > 0 else 0
+                print(f"   {target_name}: {valid_count} valid samples")
+                print(f"     Range: {min_val:.6f} to {max_val:.6f}")
+                print(f"     Mean: {mean_val:.6f}, Std: {std_val:.6f}")
         
         return targets
     

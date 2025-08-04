@@ -381,94 +381,351 @@ class ModelPerformanceVisualizer:
         plt.show()
     
     def create_prediction_analysis(self) -> None:
-        """Create prediction accuracy and residual analysis"""
-        print("🎯 Creating prediction analysis...")
+        """Create comprehensive prediction accuracy and residual analysis for all targets"""
+        print("🎯 Creating enhanced prediction analysis for all targets...")
         
-        # Extract predictions and actuals
+        # Extract predictions and actuals for all targets
         prediction_data = {}
         
         for model_name, data in self.models_data.items():
             predictions_data = data.get('predictions', {})
-            if 'test_predictions' in predictions_data and 'test_actuals' in predictions_data:
-                pred = predictions_data['test_predictions']
-                actual = predictions_data['test_actuals']
-                
-                # Flatten if nested lists
-                if pred and isinstance(pred[0], list):
-                    pred = [p[0] if isinstance(p, list) else p for p in pred]
-                if actual and isinstance(actual[0], list):
-                    actual = [a[0] if isinstance(a, list) else a for a in actual]
-                
-                prediction_data[model_name] = {
-                    'predictions': np.array(pred),
-                    'actuals': np.array(actual)
-                }
+            model_predictions = {}
+            
+            # Extract all available prediction targets
+            for key, value in predictions_data.items():
+                if 'predictions' in key and value:
+                    target_type = key.replace('test_predictions', '').replace('_predictions', '')
+                    if not target_type:
+                        target_type = 'returns'  # Default target
+                    
+                    # Get corresponding actuals
+                    actual_key = key.replace('predictions', 'actuals')
+                    if actual_key in predictions_data:
+                        pred = value
+                        actual = predictions_data[actual_key]
+                        
+                        # Flatten if nested lists
+                        if pred and isinstance(pred[0], list):
+                            pred = [p[0] if isinstance(p, list) else p for p in pred]
+                        if actual and isinstance(actual[0], list):
+                            actual = [a[0] if isinstance(a, list) else a for a in actual]
+                        
+                        model_predictions[target_type] = {
+                            'predictions': np.array(pred),
+                            'actuals': np.array(actual)
+                        }
+            
+            if model_predictions:
+                prediction_data[model_name] = model_predictions
         
         if not prediction_data:
             print("⚠️ No prediction data found in models")
             return
         
-        n_models = len(prediction_data)
-        fig, axes = plt.subplots(2, min(3, n_models), figsize=(18, 12))
-        if n_models == 1:
-            axes = axes.reshape(2, 1)
-        elif n_models == 2:
-            axes = axes.reshape(2, 2)
+        # Create comprehensive prediction analysis
+        self._create_multi_target_prediction_plots(prediction_data)
+        self._create_prediction_accuracy_heatmap(prediction_data)
+        self._create_prediction_error_distribution(prediction_data)
         
-        fig.suptitle('Prediction Analysis Across Models', fontsize=16, fontweight='bold')
+    def _create_multi_target_prediction_plots(self, prediction_data: Dict) -> None:
+        """Create prediction vs actual plots for multiple targets"""
+        
+        # Determine available targets across all models
+        all_targets = set()
+        for model_data in prediction_data.values():
+            all_targets.update(model_data.keys())
+        
+        all_targets = sorted(list(all_targets))
+        n_targets = len(all_targets)
+        n_models = len(prediction_data)
+        
+        if n_targets == 0:
+            return
+        
+        # Create subplots for each target
+        fig, axes = plt.subplots(n_targets, min(3, n_models), figsize=(18, 6*n_targets))
+        
+        # Handle axes properly for different subplot configurations
+        if n_targets == 1 and n_models == 1:
+            axes = np.array([[axes]])  # Make it 2D array
+        elif n_targets == 1:
+            axes = axes.reshape(1, -1)  # Make it 2D array with 1 row
+        elif n_models == 1:
+            axes = axes.reshape(-1, 1)  # Make it 2D array with 1 column
+        elif min(3, n_models) == 1:
+            axes = axes.reshape(-1, 1)  # Handle case where we only show 1 model
+        
+        fig.suptitle('Multi-Target Prediction Analysis: Predictions vs Actuals', fontsize=16, fontweight='bold')
         
         model_names = list(prediction_data.keys())
+        colors = sns.color_palette("husl", n_models)
         
-        for i, model_name in enumerate(model_names[:3]):  # Show first 3 models
-            data = prediction_data[model_name]
-            predictions = data['predictions']
-            actuals = data['actuals']
-            
-            col_idx = i if n_models > 1 else 0
-            
-            # Predictions vs Actuals scatter plot
-            axes[0, col_idx].scatter(actuals, predictions, alpha=0.6, s=30)
-            
-            # Perfect prediction line
-            min_val = min(min(actuals), min(predictions))
-            max_val = max(max(actuals), max(predictions))
-            axes[0, col_idx].plot([min_val, max_val], [min_val, max_val], 'r--', lw=2, alpha=0.8)
-            
-            axes[0, col_idx].set_xlabel('Actual Returns')
-            axes[0, col_idx].set_ylabel('Predicted Returns')
-            axes[0, col_idx].set_title(f'{model_name.replace(" Predictor", "")} - Predictions vs Actuals')
-            axes[0, col_idx].grid(True, alpha=0.3)
-            
-            # Add R² score
-            r2 = np.corrcoef(actuals, predictions)[0, 1] ** 2
-            axes[0, col_idx].text(0.05, 0.95, f'R² = {r2:.3f}', 
-                                 transform=axes[0, col_idx].transAxes, fontsize=10,
-                                 bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
-            
-            # Residuals plot
-            residuals = predictions - actuals
-            axes[1, col_idx].scatter(predictions, residuals, alpha=0.6, s=30, color='green')
-            axes[1, col_idx].axhline(y=0, color='red', linestyle='--', alpha=0.8)
-            axes[1, col_idx].set_xlabel('Predicted Returns')
-            axes[1, col_idx].set_ylabel('Residuals')
-            axes[1, col_idx].set_title(f'{model_name.replace(" Predictor", "")} - Residuals')
-            axes[1, col_idx].grid(True, alpha=0.3)
-            
-            # Add residual statistics
-            residual_std = np.std(residuals)
-            axes[1, col_idx].text(0.05, 0.95, f'Residual Std: {residual_std:.4f}', 
-                                 transform=axes[1, col_idx].transAxes, fontsize=10,
-                                 bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
-        
-        # Hide unused subplots
-        if n_models < 3:
-            for i in range(n_models, min(3, axes.shape[1])):
-                axes[0, i].set_visible(False)
-                axes[1, i].set_visible(False)
+        for target_idx, target_type in enumerate(all_targets):
+            for model_idx, model_name in enumerate(model_names[:3]):  # Show first 3 models
+                if target_type not in prediction_data[model_name]:
+                    continue
+                
+                data = prediction_data[model_name][target_type]
+                predictions = data['predictions']
+                actuals = data['actuals']
+                
+                # Get the correct axis
+                if axes.ndim == 2:
+                    ax = axes[target_idx, min(model_idx, axes.shape[1]-1)]
+                else:
+                    ax = axes[target_idx] if n_targets > 1 else axes[model_idx]
+                
+                # Predictions vs Actuals scatter plot
+                ax.scatter(actuals, predictions, alpha=0.6, s=30, color=colors[model_idx])
+                
+                # Perfect prediction line
+                min_val = min(min(actuals), min(predictions))
+                max_val = max(max(actuals), max(predictions))
+                ax.plot([min_val, max_val], [min_val, max_val], 'r--', lw=2, alpha=0.8)
+                
+                # Formatting
+                target_label = target_type.replace('_', ' ').title()
+                ax.set_xlabel(f'Actual {target_label}')
+                ax.set_ylabel(f'Predicted {target_label}')
+                ax.set_title(f'{model_name.replace(" Predictor", "")} - {target_label}')
+                ax.grid(True, alpha=0.3)
+                
+                # Add statistics
+                r2 = np.corrcoef(actuals, predictions)[0, 1] ** 2
+                mae = np.mean(np.abs(predictions - actuals))
+                ax.text(0.05, 0.95, f'R² = {r2:.3f}\nMAE = {mae:.4f}', 
+                       transform=ax.transAxes, fontsize=9,
+                       bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
         
         plt.tight_layout()
-        plt.savefig('data/results/visualizations/prediction_analysis.png', dpi=300, bbox_inches='tight')
+        plt.savefig('data/results/visualizations/multi_target_prediction_analysis.png', dpi=300, bbox_inches='tight')
         plt.show()
+    
+    def _create_prediction_accuracy_heatmap(self, prediction_data: Dict) -> None:
+        """Create heatmap showing prediction accuracy across models and targets"""
+        
+        # Calculate accuracy metrics for each model-target combination
+        accuracy_data = []
+        
+        for model_name, model_targets in prediction_data.items():
+            for target_type, data in model_targets.items():
+                predictions = data['predictions']
+                actuals = data['actuals']
+                
+                # Calculate various accuracy metrics
+                mae = np.mean(np.abs(predictions - actuals))
+                rmse = np.sqrt(np.mean((predictions - actuals) ** 2))
+                r2 = np.corrcoef(actuals, predictions)[0, 1] ** 2
+                
+                # Directional accuracy (for continuous targets)
+                if len(predictions) > 1:
+                    pred_direction = np.diff(predictions) > 0
+                    actual_direction = np.diff(actuals) > 0
+                    dir_accuracy = np.mean(pred_direction == actual_direction) if len(pred_direction) > 0 else 0
+                else:
+                    dir_accuracy = 0
+                
+                accuracy_data.append({
+                    'Model': model_name.replace(' Predictor', ''),
+                    'Target': target_type.replace('_', ' ').title(),
+                    'MAE': mae,
+                    'RMSE': rmse,
+                    'R²': r2,
+                    'Dir_Acc': dir_accuracy
+                })
+        
+        if not accuracy_data:
+            return
+        
+        accuracy_df = pd.DataFrame(accuracy_data)
+        
+        # Create heatmaps for different metrics
+        fig, axes = plt.subplots(2, 2, figsize=(16, 12))
+        fig.suptitle('Prediction Accuracy Heatmap Across Models and Targets', fontsize=16, fontweight='bold')
+        
+        metrics = ['MAE', 'RMSE', 'R²', 'Dir_Acc']
+        titles = ['Mean Absolute Error', 'Root Mean Square Error', 'R² Score', 'Directional Accuracy']
+        
+        for idx, (metric, title) in enumerate(zip(metrics, titles)):
+            row, col = idx // 2, idx % 2
+            
+            # Pivot data for heatmap
+            heatmap_data = accuracy_df.pivot(index='Model', columns='Target', values=metric)
+            
+            # Create heatmap
+            cmap = 'RdYlGn' if metric in ['R²', 'Dir_Acc'] else 'RdYlGn_r'
+            sns.heatmap(heatmap_data, annot=True, cmap=cmap, ax=axes[row, col], 
+                       fmt='.3f', cbar_kws={'label': metric})
+            axes[row, col].set_title(title, fontweight='bold')
+            axes[row, col].set_ylabel('Models')
+            axes[row, col].set_xlabel('Targets')
+        
+        plt.tight_layout()
+        plt.savefig('data/results/visualizations/prediction_accuracy_heatmap.png', dpi=300, bbox_inches='tight')
+        plt.show()
+    
+    def _create_prediction_error_distribution(self, prediction_data: Dict) -> None:
+        """Create error distribution analysis for all targets"""
+        
+        fig, axes = plt.subplots(2, 2, figsize=(16, 12))
+        fig.suptitle('Prediction Error Distribution Analysis', fontsize=16, fontweight='bold')
+        
+        # Collect all errors by target type
+        errors_by_target = {}
+        
+        for model_name, model_targets in prediction_data.items():
+            for target_type, data in model_targets.items():
+                predictions = data['predictions']
+                actuals = data['actuals']
+                errors = predictions - actuals
+                
+                if target_type not in errors_by_target:
+                    errors_by_target[target_type] = {}
+                errors_by_target[target_type][model_name] = errors
+        
+        # Plot 1: Error distribution by target type
+        ax1 = axes[0, 0]
+        for target_type, model_errors in errors_by_target.items():
+            all_errors = np.concatenate(list(model_errors.values()))
+            ax1.hist(all_errors, alpha=0.6, label=target_type.replace('_', ' ').title(), bins=30)
+        
+        ax1.set_xlabel('Prediction Error')
+        ax1.set_ylabel('Frequency')
+        ax1.set_title('Error Distribution by Target Type')
+        ax1.legend()
+        ax1.grid(True, alpha=0.3)
+        
+        # Plot 2: Error magnitude comparison
+        ax2 = axes[0, 1]
+        error_magnitudes = []
+        labels = []
+        
+        for target_type, model_errors in errors_by_target.items():
+            for model_name, errors in model_errors.items():
+                error_magnitudes.append(np.abs(errors))
+                labels.append(f"{model_name.replace(' Predictor', '')}\n{target_type}")
+        
+        if error_magnitudes:
+            ax2.boxplot(error_magnitudes, labels=labels)
+            ax2.set_ylabel('Absolute Error')
+            ax2.set_title('Error Magnitude Distribution')
+            ax2.tick_params(axis='x', rotation=45)
+            ax2.grid(True, alpha=0.3)
+        
+        # Plot 3: Prediction vs Actual correlation by model
+        ax3 = axes[1, 0]
+        correlations = []
+        model_labels = []
+        
+        for model_name, model_targets in prediction_data.items():
+            model_correlations = []
+            for target_type, data in model_targets.items():
+                corr = np.corrcoef(data['predictions'], data['actuals'])[0, 1]
+                model_correlations.append(corr)
+            
+            if model_correlations:
+                correlations.append(np.mean(model_correlations))
+                model_labels.append(model_name.replace(' Predictor', ''))
+        
+        if correlations:
+            bars = ax3.bar(model_labels, correlations, color=sns.color_palette("viridis", len(correlations)))
+            ax3.set_ylabel('Average Correlation')
+            ax3.set_title('Prediction-Actual Correlation by Model')
+            ax3.tick_params(axis='x', rotation=45)
+            ax3.grid(True, alpha=0.3)
+            
+            # Add value labels on bars
+            for bar, corr in zip(bars, correlations):
+                ax3.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.01,
+                        f'{corr:.3f}', ha='center', va='bottom', fontsize=9)
+        
+        # Plot 4: Prediction improvement over naive forecast
+        ax4 = axes[1, 1]
+        improvements = []
+        improvement_labels = []
+        
+        for model_name, model_targets in prediction_data.items():
+            for target_type, data in model_targets.items():
+                predictions = data['predictions']
+                actuals = data['actuals']
+                
+                # Naive forecast (previous value or mean)
+                if len(actuals) > 1:
+                    naive_forecast = np.roll(actuals, 1)[1:]  # Previous value
+                    model_mae = np.mean(np.abs(predictions[1:] - actuals[1:]))
+                    naive_mae = np.mean(np.abs(naive_forecast - actuals[1:]))
+                    
+                    if naive_mae > 0:
+                        improvement = (naive_mae - model_mae) / naive_mae * 100
+                        improvements.append(improvement)
+                        improvement_labels.append(f"{model_name.replace(' Predictor', '')}\n{target_type}")
+        
+        if improvements:
+            colors = ['green' if imp > 0 else 'red' for imp in improvements]
+            bars = ax4.bar(improvement_labels, improvements, color=colors, alpha=0.7)
+            ax4.set_ylabel('Improvement over Naive (%)')
+            ax4.set_title('Model Improvement over Naive Forecast')
+            ax4.tick_params(axis='x', rotation=45)
+            ax4.axhline(y=0, color='black', linestyle='-', alpha=0.5)
+            ax4.grid(True, alpha=0.3)
+            
+            # Add value labels
+            for bar, imp in zip(bars, improvements):
+                ax4.text(bar.get_x() + bar.get_width()/2, 
+                        bar.get_height() + (1 if bar.get_height() >= 0 else -3),
+                        f'{imp:.1f}%', ha='center', 
+                        va='bottom' if bar.get_height() >= 0 else 'top', fontsize=9)
+        
+        plt.tight_layout()
+        plt.savefig('data/results/visualizations/prediction_error_distribution.png', dpi=300, bbox_inches='tight')
+        plt.show()
+    
+    def create_prediction_analysis(self) -> None:
+        """Create comprehensive prediction accuracy and residual analysis for all targets"""
+        print("🎯 Creating enhanced prediction analysis for all targets...")
+        
+        # Extract predictions and actuals for all targets
+        prediction_data = {}
+        
+        for model_name, data in self.models_data.items():
+            predictions_data = data.get('predictions', {})
+            model_predictions = {}
+            
+            # Extract all available prediction targets
+            for key, value in predictions_data.items():
+                if 'predictions' in key and value:
+                    target_type = key.replace('test_predictions', '').replace('_predictions', '')
+                    if not target_type:
+                        target_type = 'returns'  # Default target
+                    
+                    # Get corresponding actuals
+                    actual_key = key.replace('predictions', 'actuals')
+                    if actual_key in predictions_data:
+                        pred = value
+                        actual = predictions_data[actual_key]
+                        
+                        # Flatten if nested lists
+                        if pred and isinstance(pred[0], list):
+                            pred = [p[0] if isinstance(p, list) else p for p in pred]
+                        if actual and isinstance(actual[0], list):
+                            actual = [a[0] if isinstance(a, list) else a for a in actual]
+                        
+                        model_predictions[target_type] = {
+                            'predictions': np.array(pred),
+                            'actuals': np.array(actual)
+                        }
+            
+            if model_predictions:
+                prediction_data[model_name] = model_predictions
+        
+        if not prediction_data:
+            print("⚠️ No prediction data found in models")
+            return
+        
+        # Create comprehensive prediction analysis
+        self._create_multi_target_prediction_plots(prediction_data)
+        self._create_prediction_accuracy_heatmap(prediction_data)
+        self._create_prediction_error_distribution(prediction_data)
     
     def create_model_summary_report(self) -> str:
         """Create a comprehensive summary report"""
