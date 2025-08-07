@@ -83,6 +83,71 @@ AdaptiveLossArchitecture/
 - **Interactive Visualizations**: Performance comparison plots
 - **Automated Reporting**: Detailed analysis reports
 - **Configuration Management**: YAML-based centralized config
+- **Dead Neuron Monitoring**: Real-time neural network health analysis
+
+### 🔍 Dead Neuron Monitoring System
+
+**NEW**: Advanced monitoring system for neural network health during training.
+
+#### Key Features:
+- **Universal Compatibility**: Works with all PyTorch neural networks
+- **Real-Time Detection**: Monitors ReLU dead neurons and LSTM inactive states
+- **Dropout Impact Analysis**: Shows combined effect of dead neurons + dropout
+- **Health Assessment**: Critical/Warning/Healthy status for each layer
+- **Learning Rate Tracking**: Detects acceleration patterns indicating problems
+- **Automated Recommendations**: Actionable advice for model improvements
+- **Comprehensive Reporting**: JSON export with detailed statistics
+
+#### What It Monitors:
+- **ReLU Dead Neurons**: Neurons that consistently output zero
+- **LSTM Cell States**: Hidden and cell state activity patterns
+- **Gradient Flow**: Zero gradient ratios across layers
+- **Capacity Utilization**: Effective network capacity after inactivity
+- **Training Health**: Overall model learning efficiency
+
+#### Example Output:
+```
+🔍 Dead Neuron Monitor Report - Epoch 50
+
+📊 Layer: network.1 (ReLU)
+   Dead Neuron Ratio: 0.579 🔴 CRITICAL
+   Effective Dead Ratio: 0.685 (including 30% dropout)
+   Completely Dead Neurons: 37
+   Capacity Utilization: 31.5%
+
+📊 Layer: network.4 (ReLU)  
+   Dead Neuron Ratio: 0.430 🟡 WARNING
+   Effective Dead Ratio: 0.544 (including 20% dropout)
+   Capacity Utilization: 45.6%
+
+🔍 Final Health Assessment: CRITICAL
+   Recommendations:
+   • Immediate action required: Consider using Leaky ReLU
+   • High dropout rates compound dead neuron problem
+   • Consider reducing dropout from 30% to 15%
+```
+
+#### Integration:
+The monitoring system is automatically enabled in neural network models:
+
+```python
+# Enhanced Adaptive Predictor
+python3 src/models/enhanced_adaptive_predictor.py
+# ✅ Dead neuron monitoring active
+
+# LSTM Predictor  
+python3 src/models/lstm_predictor.py
+# ✅ LSTM state monitoring active
+```
+
+#### Key Benefits:
+- **Early Problem Detection**: Identify dead neurons before they impact performance
+- **Dropout Optimization**: Understand combined effect of dropout + dead neurons
+- **Training Efficiency**: Maximize effective network capacity
+- **Model Health**: Ensure optimal learning throughout training
+- **Research Insights**: Detailed analysis of neural network behavior
+
+This addresses the critical ReLU dead neuron problem where neurons become permanently inactive, providing actionable insights to improve model training health.
 
 ## Installation & Setup
 
