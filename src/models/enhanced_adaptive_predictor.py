@@ -60,6 +60,9 @@ sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..'))
 from src.data_processing.unified_preprocessing import UnifiedPreprocessor
 from src.data_processing.unified_targets import UnifiedTargetManager
 
+# Import dead neuron monitoring system
+from src.utils.dead_neuron_monitor import DeadNeuronMonitor, integrate_with_training_loop, monitor_enhanced_adaptive_predictor
+
 # Define evaluation functions (same as other models)
 def comprehensive_model_evaluation(model, X_test, y_test, scaler_y, model_name, train_test_mean_diff=0):
     model.eval()
@@ -535,8 +538,20 @@ def select_best_features(df: pd.DataFrame, target_col: str = 'target_return',
     return selected_features
 
 def train_model(model, train_loader, loss_function, optimizer, epochs: int, 
-                model_name: str) -> Dict[str, List[float]]:
-    """Train model and return training history"""
+                model_name: str, enable_dead_neuron_monitoring: bool = True) -> Dict[str, List[float]]:
+    """Train model and return training history with optional dead neuron monitoring"""
+    
+    # Initialize dead neuron monitoring if enabled
+    dead_neuron_monitor = None
+    if enable_dead_neuron_monitoring:
+        print(f"\n🔍 Initializing dead neuron monitoring for {model_name}...")
+        dead_neuron_monitor = monitor_enhanced_adaptive_predictor(
+            model, optimizer,
+            threshold=0.01,
+            monitoring_frequency=5,
+            verbose=True,
+            save_results=True
+        )
     
     # Initialize history
     if hasattr(loss_function, 'feature_names'):
@@ -548,7 +563,8 @@ def train_model(model, train_loader, loss_function, optimizer, epochs: int,
     history = {
         'loss': [],
         'mse_loss': [],
-        'correlation_losses': {name: [] for name in all_loss_names}
+        'correlation_losses': {name: [] for name in all_loss_names},
+        'dead_neuron_monitoring': dead_neuron_monitor is not None
     }
     
     model.train()
@@ -584,6 +600,11 @@ def train_model(model, train_loader, loss_function, optimizer, epochs: int,
             loss.backward()
             optimizer.step()
             epoch_loss += loss.item()
+            
+            # Update dead neuron monitoring
+            if dead_neuron_monitor:
+                dead_neuron_monitor.update_batch_count()
+                dead_neuron_monitor.track_learning_rate(optimizer)
         
         # Average losses over batches
         avg_loss = epoch_loss / len(train_loader)
@@ -601,6 +622,10 @@ def train_model(model, train_loader, loss_function, optimizer, epochs: int,
         if hasattr(loss_function, 'update_weights'):
             loss_function.update_weights(epoch)
         
+        # Update dead neuron monitoring
+        if dead_neuron_monitor:
+            dead_neuron_monitor.update_epoch_count()
+        
         # Print progress using config interval
         progress_interval = CONFIG['training']['progress_report_interval']
         if epoch % progress_interval == 0 or epoch == epochs - 1:
@@ -614,6 +639,26 @@ def train_model(model, train_loader, loss_function, optimizer, epochs: int,
                       f"Smoothness: {smoothness_loss:.6f}, Momentum: {momentum_loss:.6f}")
             else:
                 print(f"{model_name} - Epoch {epoch:3d}: Loss = {avg_loss:.6f}, MSE = {avg_mse:.6f}")
+    
+    # Cleanup dead neuron monitoring and get final report
+    if dead_neuron_monitor:
+        print(f"\n🔍 Dead Neuron Monitoring Final Report:")
+        final_report = dead_neuron_monitor.get_summary_report()
+        print(f"   Overall Health: {final_report['overall_health'].upper()}")
+        print(f"   Critical Layers: {sum(1 for layer in final_report['layer_analysis'].values() if layer.get('status') == 'critical')}")
+        print(f"   Warning Layers: {sum(1 for layer in final_report['layer_analysis'].values() if layer.get('status') == 'warning')}")
+        print(f"   Healthy Layers: {sum(1 for layer in final_report['layer_analysis'].values() if layer.get('status') == 'healthy')}")
+        
+        if final_report['recommendations']:
+            print(f"   Recommendations:")
+            for rec in final_report['recommendations']:
+                print(f"     • {rec}")
+        
+        # Store monitoring results in history
+        history['dead_neuron_report'] = final_report
+        
+        # Cleanup
+        dead_neuron_monitor.cleanup()
     
     return history
 

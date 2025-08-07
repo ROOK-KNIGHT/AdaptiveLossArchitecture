@@ -60,6 +60,9 @@ sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..'))
 from src.data_processing.unified_preprocessing import UnifiedPreprocessor
 from src.data_processing.unified_targets import UnifiedTargetManager
 
+# Import dead neuron monitoring system
+from src.utils.dead_neuron_monitor import DeadNeuronMonitor, integrate_with_training_loop, monitor_lstm_predictor
+
 class LSTMModel(nn.Module):
     """LSTM neural network for stock price prediction"""
     
@@ -208,8 +211,8 @@ class LSTMStockPredictor:
         
         return train_loader, test_loader
     
-    def train_model(self, train_loader: DataLoader) -> Dict[str, List[float]]:
-        """Train the LSTM model"""
+    def train_model(self, train_loader: DataLoader, enable_dead_neuron_monitoring: bool = True) -> Dict[str, List[float]]:
+        """Train the LSTM model with optional dead neuron monitoring"""
         print(f"\n🧠 Training LSTM model...")
         print(f"   Device: {self.device}")
         print(f"   Hidden size: {self.hidden_size}")
@@ -232,8 +235,23 @@ class LSTMStockPredictor:
         criterion = nn.MSELoss()
         optimizer = optim.Adam(self.model.parameters(), lr=self.learning_rate)
         
+        # Initialize dead neuron monitoring if enabled
+        dead_neuron_monitor = None
+        if enable_dead_neuron_monitoring:
+            print(f"\n🔍 Initializing dead neuron monitoring for LSTM model...")
+            dead_neuron_monitor = monitor_lstm_predictor(
+                self.model, optimizer,
+                threshold=0.001,  # Lower threshold for LSTM
+                monitoring_frequency=10,
+                verbose=True,
+                save_results=True
+            )
+        
         # Training history
-        history = {'loss': []}
+        history = {
+            'loss': [],
+            'dead_neuron_monitoring': dead_neuron_monitor is not None
+        }
         
         # Training loop
         self.model.train()
@@ -252,13 +270,42 @@ class LSTMStockPredictor:
                 optimizer.step()
                 
                 epoch_loss += loss.item()
+                
+                # Update dead neuron monitoring
+                if dead_neuron_monitor:
+                    dead_neuron_monitor.update_batch_count()
+                    dead_neuron_monitor.track_learning_rate(optimizer)
             
             avg_loss = epoch_loss / len(train_loader)
             history['loss'].append(avg_loss)
             
+            # Update dead neuron monitoring
+            if dead_neuron_monitor:
+                dead_neuron_monitor.update_epoch_count()
+            
             # Print progress
             if epoch % 20 == 0 or epoch == self.epochs - 1:
                 print(f"   Epoch {epoch:3d}/{self.epochs}: Loss = {avg_loss:.6f}")
+        
+        # Cleanup dead neuron monitoring and get final report
+        if dead_neuron_monitor:
+            print(f"\n🔍 LSTM Dead Neuron Monitoring Final Report:")
+            final_report = dead_neuron_monitor.get_summary_report()
+            print(f"   Overall Health: {final_report['overall_health'].upper()}")
+            print(f"   Critical Layers: {sum(1 for layer in final_report['layer_analysis'].values() if layer.get('status') == 'critical')}")
+            print(f"   Warning Layers: {sum(1 for layer in final_report['layer_analysis'].values() if layer.get('status') == 'warning')}")
+            print(f"   Healthy Layers: {sum(1 for layer in final_report['layer_analysis'].values() if layer.get('status') == 'healthy')}")
+            
+            if final_report['recommendations']:
+                print(f"   Recommendations:")
+                for rec in final_report['recommendations']:
+                    print(f"     • {rec}")
+            
+            # Store monitoring results in history
+            history['dead_neuron_report'] = final_report
+            
+            # Cleanup
+            dead_neuron_monitor.cleanup()
         
         print("✅ LSTM training completed!")
         return history
