@@ -6,7 +6,7 @@ import logging
 import os
 
 class TechnicalIndicatorsCalculator:
-    def __init__(self, strategy='reversal', direction='both'):
+    def __init__(self, strategy='momentum', direction='long'):
         self.strategy = strategy
         self.direction = direction
         self.last_api_minute = None
@@ -20,7 +20,7 @@ class TechnicalIndicatorsCalculator:
             formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
             handler.setFormatter(formatter)
             self.logger.addHandler(handler)
-            self.logger.setLevel(logging.INFO)
+            self.logger.setLevel(logging.DEBUG)
 
     def calculate_band_stability(self, band_values: list) -> bool:
         """Calculate if a volatility band has been stable over the period"""
@@ -105,118 +105,496 @@ class TechnicalIndicatorsCalculator:
             self.logger.info("\n✅ RESULT: Band is stable")
             return True
 
-    def calculate_volatility_metrics(self, df):
-        """Calculate volatility metrics using the previous bar's data"""
-        if len(df) < 20:  # Need minimum data for meaningful analysis
-            return None
+    def calculate_volatility_metrics_for_dataframe(self, df, lookback=20, save_to_csv=True):
+        """Calculate volatility metrics for entire DataFrame using rolling window approach"""
+        if len(df) < lookback:
+            self.logger.warning(f"DataFrame has {len(df)} rows, need at least {lookback} for volatility calculations")
+            return df
+        
+        # Initialize result lists
+        high_bands = []
+        low_bands = []
+        high_exceedances = []
+        low_exceedances = []
+        distances_to_high = []
+        distances_to_low = []
+        positions_in_range = []
+        close_above_high_band = []
+        close_below_low_band = []
+        close_vs_high_band = []
+        close_vs_low_band = []
+        momentum_signals = []
+        band_ranges = []
+        band_midpoints = []
+        
+        # Get timestamps for CSV logging
+        if hasattr(df.index, 'dtype') and ('datetime' in str(df.index.dtype) or 'Timestamp' in str(type(df.index[0]))):
+            timestamps = df.index
+        elif 'datetime' in df.columns:
+            timestamps = df['datetime']
+        else:
+            # Create dummy timestamps
+            timestamps = pd.date_range(start='2024-01-01', periods=len(df), freq='D')
+        
+        self.logger.info(f"Calculating volatility metrics for {len(df)} rows with lookback={lookback}")
+        
+        for i in range(len(df)):
+            if i < lookback:
+                # For early rows, use NaN values
+                high_bands.append(np.nan)
+                low_bands.append(np.nan)
+                high_exceedances.append(np.nan)
+                low_exceedances.append(np.nan)
+                distances_to_high.append(np.nan)
+                distances_to_low.append(np.nan)
+                positions_in_range.append(np.nan)
+                close_above_high_band.append(np.nan)
+                close_below_low_band.append(np.nan)
+                close_vs_high_band.append(np.nan)
+                close_vs_low_band.append(np.nan)
+                momentum_signals.append(np.nan)
+                band_ranges.append(np.nan)
+                band_midpoints.append(np.nan)
+                continue
             
-        # Use previous bar's close for calculations
-        prev_bar = df.iloc[-2]  # Previous bar
-        lookback = min(2000, len(df)-2)  # Use last 20 bars excluding current bar
-        
-        # Get current system time for accurate second tracking
-        current_time = datetime.now(pytz.timezone('America/Los_Angeles'))
-        api_minute = df.index[-1].minute
-        
-        # Only update last_api_minute, counters are now reset after order fill confirmation
-        if api_minute != self.last_api_minute:
-            self.last_api_minute = api_minute
+            # Get the lookback window (excluding current bar for calculation)
+            window_end = i  # Current bar index
+            window_start = max(0, window_end - lookback)
+            window_df = df.iloc[window_start:window_end]  # Exclude current bar
             
-            # Log counter state for debugging
-            if self.orders_placed > 0 or self.scale_in_count > 0:
-                self.logger.info(f"Current counter state - orders_placed: {self.orders_placed}, scale_in_count: {self.scale_in_count}")
-        
-        # Calculate rolling means and standard deviations up to previous bar
-        highside_vol = df['high'] - df['close']
-        lowside_vol = df['low'] - df['close']
-        mean_highside = highside_vol.iloc[:-1].rolling(window=lookback).mean().iloc[-1]
-        mean_lowside = lowside_vol.iloc[:-1].rolling(window=lookback).mean().iloc[-1]
-        std_highside = highside_vol.iloc[:-1].rolling(window=lookback).std().iloc[-1]
-        std_lowside = lowside_vol.iloc[:-1].rolling(window=lookback).std().iloc[-1]
-        
-        # Calculate volatility bands based on previous bar's close
-        high_side_limit = prev_bar['close'] + (std_highside + mean_highside)
-        low_side_limit = prev_bar['close'] - (std_lowside - mean_lowside)
-        
-        # Calculate exceedances for current bar
-        current_bar = df.iloc[-1]
-        high_exceedance = current_bar['high'] - high_side_limit if current_bar['high'] > high_side_limit else 0
-        low_exceedance = low_side_limit - current_bar['low'] if current_bar['low'] < low_side_limit else 0
-        
-        # Calculate relative distances and levels
-        current_price = current_bar['close']
-        band_range = high_side_limit - low_side_limit
-        band_midpoint = low_side_limit + (band_range / 2)
-        
-        # Calculate distance from each band as percentage
-        distance_to_high = ((high_side_limit - current_price) / band_range) * 100
-        distance_to_low = ((current_price - low_side_limit) / band_range) * 100
-        
-        # Calculate position within band range as percentage (0% = at lower band, 100% = at upper band)
-        position_in_range = ((current_price - low_side_limit) / band_range) * 100
-        
-        # Check for trading signals using system time
-        seconds = current_time.second
-        near_minute_end = seconds >= 55 and seconds <= 59
-        
-        trading_signal = None
-        signal_direction = None
-        
-        if near_minute_end:
-            self.logger.info(f"Evaluating trading signals at {current_time.strftime('%H:%M:%S')}")
-            self.logger.info(f"Current Price: ${current_price:.2f} | Position in Range: {position_in_range:.1f}%")
-            self.logger.info(f"Bands: High=${high_side_limit:.2f} | Low=${low_side_limit:.2f}")
+            if len(window_df) == 0:
+                high_bands.append(np.nan)
+                low_bands.append(np.nan)
+                high_exceedances.append(np.nan)
+                low_exceedances.append(np.nan)
+                distances_to_high.append(np.nan)
+                distances_to_low.append(np.nan)
+                positions_in_range.append(np.nan)
+                close_above_high_band.append(np.nan)
+                close_below_low_band.append(np.nan)
+                close_vs_high_band.append(np.nan)
+                close_vs_low_band.append(np.nan)
+                momentum_signals.append(np.nan)
+                band_ranges.append(np.nan)
+                band_midpoints.append(np.nan)
+                continue
             
-            # Check if we're past 12:30 PM PST cutoff
-            current_hour = current_time.hour
-            current_minute = current_time.minute
-            after_cutoff = (current_hour > 12) or (current_hour == 12 and current_minute >= 30)
+            # Use previous bar's close for calculations (if available)
+            if i > 0:
+                prev_close = df.iloc[i-1]['close']
+            else:
+                prev_close = df.iloc[i]['close']
             
-            if after_cutoff:
-                self.logger.info("No signal generated - After 12:30 PM PST cutoff")
+            # Calculate volatility components
+            highside_vol = window_df['high'] - window_df['close']
+            lowside_vol = window_df['low'] - window_df['close']
             
-            # Only generate trading signals before cutoff time
-            if not after_cutoff:
-                # Strategy determines the signal direction based on price position in the band
-                if self.strategy == 'reversal':
-                    self.logger.info("Evaluating reversal strategy conditions")
-                    # Reversal strategy: SHORT at top of range, LONG at bottom of range
-                    if position_in_range >= 99 and self.direction in ['short', 'both']:
-                        trading_signal = f"SHORT Signal @ {current_time.strftime('%H:%M:%S')}"
-                        signal_direction = "SHORT"
-                        self.logger.info(f"Reversal SHORT signal triggered: Price at {position_in_range:.1f}% of range")
-                    elif position_in_range <= 1 and self.direction in ['long', 'both']:
-                        trading_signal = f"LONG Signal @ {current_time.strftime('%H:%M:%S')}"
-                        signal_direction = "LONG"
-                        self.logger.info(f"Reversal LONG signal triggered: Price at {position_in_range:.1f}% of range")
-                    else:
-                        self.logger.info(f"No reversal signal: Price at {position_in_range:.1f}% of range")
-                else:  # momentum strategy
-                    self.logger.info("Evaluating momentum strategy conditions")
-                    # Momentum strategy: LONG at top of range, SHORT at bottom of range
-                    if position_in_range >= 99 and self.direction in ['long', 'both']:
-                        trading_signal = f"LONG Signal @ {current_time.strftime('%H:%M:%S')}"
-                        signal_direction = "LONG"
-                        self.logger.info(f"Momentum LONG signal triggered: Price at {position_in_range:.1f}% of range")
-                    elif position_in_range <= 1 and self.direction in ['short', 'both']:
-                        trading_signal = f"SHORT Signal @ {current_time.strftime('%H:%M:%S')}"
-                        signal_direction = "SHORT"
-                        self.logger.info(f"Momentum SHORT signal triggered: Price at {position_in_range:.1f}% of range")
-                    else:
-                        self.logger.info(f"No momentum signal: Price at {position_in_range:.1f}% of range")
+            mean_highside = highside_vol.mean()
+            mean_lowside = lowside_vol.mean()
+            std_highside = highside_vol.std()
+            std_lowside = lowside_vol.std()
+            
+            # Handle NaN values
+            if pd.isna(mean_highside) or pd.isna(mean_lowside) or pd.isna(std_highside) or pd.isna(std_lowside):
+                high_bands.append(np.nan)
+                low_bands.append(np.nan)
+                high_exceedances.append(np.nan)
+                low_exceedances.append(np.nan)
+                distances_to_high.append(np.nan)
+                distances_to_low.append(np.nan)
+                positions_in_range.append(np.nan)
+                close_above_high_band.append(np.nan)
+                close_below_low_band.append(np.nan)
+                close_vs_high_band.append(np.nan)
+                close_vs_low_band.append(np.nan)
+                momentum_signals.append(np.nan)
+                band_ranges.append(np.nan)
+                band_midpoints.append(np.nan)
+                continue
+            
+            # Calculate volatility bands based on previous bar's close
+            high_side_limit = prev_close + (std_highside + mean_highside)
+            low_side_limit = prev_close - (std_lowside - mean_lowside)
+            
+            # Current bar data
+            current_bar = df.iloc[i]
+            current_high = current_bar['high']
+            current_low = current_bar['low']
+            current_close = current_bar['close']
+            
+            # Calculate exceedances for current bar
+            high_exceedance = max(0, current_high - high_side_limit)
+            low_exceedance = max(0, low_side_limit - current_low)
+            
+            # Calculate close price comparisons with bands
+            is_close_above_high = current_close > high_side_limit
+            is_close_below_low = current_close < low_side_limit
+            close_vs_high_diff = current_close - high_side_limit  # Positive if above, negative if below
+            close_vs_low_diff = current_close - low_side_limit    # Positive if above, negative if below
+            
+            # Calculate relative distances and levels
+            band_range = high_side_limit - low_side_limit
+            band_midpoint = low_side_limit + (band_range / 2)
+            
+            if band_range > 0:
+                # Calculate distance from each band as percentage
+                distance_to_high = ((high_side_limit - current_close) / band_range) * 100
+                distance_to_low = ((current_close - low_side_limit) / band_range) * 100
+                
+                # Calculate position within band range as percentage (0% = at lower band, 100% = at upper band)
+                position_in_range = ((current_close - low_side_limit) / band_range) * 100
+                
+                # Calculate momentum signals based on position in range
+                # Momentum strategy: LONG at top of range (>=99%), SHORT at bottom of range (<=1%)
+                if position_in_range >= 99:
+                    momentum_signal = "LONG"
+                elif position_in_range <= 1:
+                    momentum_signal = "SHORT"
+                else:
+                    momentum_signal = None
+            else:
+                distance_to_high = np.nan
+                distance_to_low = np.nan
+                position_in_range = np.nan
+                momentum_signal = None
+            
+            # Store results
+            high_bands.append(high_side_limit)
+            low_bands.append(low_side_limit)
+            high_exceedances.append(high_exceedance)
+            low_exceedances.append(low_exceedance)
+            distances_to_high.append(distance_to_high)
+            distances_to_low.append(distance_to_low)
+            positions_in_range.append(position_in_range)
+            close_above_high_band.append(1 if is_close_above_high else 0)
+            close_below_low_band.append(1 if is_close_below_low else 0)
+            close_vs_high_band.append(close_vs_high_diff)
+            close_vs_low_band.append(close_vs_low_diff)
+            momentum_signals.append(momentum_signal)
+            band_ranges.append(band_range)
+            band_midpoints.append(band_midpoint)
+            
+            # Log progress every 100 rows and last row
+            if i % 100 == 0 or i == len(df) - 1:
+                self.logger.info(f"Processed {i+1}/{len(df)} rows")
         
-        return {
-            'high_band': high_side_limit,
-            'low_band': low_side_limit,
-            'high_exceedance': high_exceedance,
-            'low_exceedance': low_exceedance,
-            'trading_signal': trading_signal,
-            'signal_direction': signal_direction,
-            'distance_to_high': distance_to_high,
-            'distance_to_low': distance_to_low,
-            'position_in_range': position_in_range,
-            'current_price': current_price
-        }
+        # Add results to DataFrame
+        df_result = df.copy()
+        df_result['Volatility_High_Band'] = high_bands
+        df_result['Volatility_Low_Band'] = low_bands
+        df_result['High_Exceedance'] = high_exceedances
+        df_result['Low_Exceedance'] = low_exceedances
+        df_result['Distance_To_High_Pct'] = distances_to_high
+        df_result['Distance_To_Low_Pct'] = distances_to_low
+        df_result['Position_In_Range_Pct'] = positions_in_range
+        df_result['Close_Above_High_Band'] = close_above_high_band
+        df_result['Close_Below_Low_Band'] = close_below_low_band
+        df_result['Close_Vs_High_Band'] = close_vs_high_band
+        df_result['Close_Vs_Low_Band'] = close_vs_low_band
+        df_result['Momentum_Signal'] = momentum_signals
+        df_result['Band_Range'] = band_ranges
+        df_result['Band_Midpoint'] = band_midpoints
+        
+        # Note: CSV saving is now handled by the unified_preprocessing.py pipeline
+        # Individual indicator CSV files are still saved via _save_technical_indicators_to_csv
+        
+        self.logger.info(f"✓ Volatility metrics calculated for all {len(df)} rows")
+        return df_result
+    
+
+    def calculate_volatility_metrics(self, df, save_to_csv=True):
+        """Legacy method for backward compatibility - calls the new DataFrame method"""
+        df_with_metrics = self.calculate_volatility_metrics_for_dataframe(df)
+        
+        # Return the last row's metrics in the original format
+        if len(df_with_metrics) > 0:
+            last_row = df_with_metrics.iloc[-1]
+            
+            # Save to CSV if requested
+            if save_to_csv:
+                # Get timestamp from the data
+                if hasattr(df.index, 'dtype') and ('datetime' in str(df.index.dtype) or 'Timestamp' in str(type(df.index[0]))):
+                    current_time = df.index[-1]
+                elif 'datetime' in df.columns:
+                    current_time = df['datetime'].iloc[-1]
+                else:
+                    current_time = pd.Timestamp.now()
+                
+                # Convert pandas Timestamp to datetime if needed
+                if hasattr(current_time, 'to_pydatetime'):
+                    current_time = current_time.to_pydatetime()
+                
+                # Prepare metrics for CSV saving
+                metrics = {
+                    'timestamp': current_time,
+                    'current_price': last_row.get('close', np.nan),
+                    'prev_close': df.iloc[-2]['close'] if len(df) > 1 else last_row.get('close', np.nan),
+                    'high_side_limit': last_row.get('Volatility_High_Band', np.nan),
+                    'low_side_limit': last_row.get('Volatility_Low_Band', np.nan),
+                    'band_range': last_row.get('Band_Range', np.nan),
+                    'band_midpoint': last_row.get('Band_Midpoint', np.nan),
+                    'high_exceedance': last_row.get('High_Exceedance', 0),
+                    'low_exceedance': last_row.get('Low_Exceedance', 0),
+                    'distance_to_high': last_row.get('Distance_To_High_Pct', np.nan),
+                    'distance_to_low': last_row.get('Distance_To_Low_Pct', np.nan),
+                    'position_in_range': last_row.get('Position_In_Range_Pct', np.nan),
+                    'mean_highside': np.nan,  # Not available in new method
+                    'mean_lowside': np.nan,   # Not available in new method
+                    'std_highside': np.nan,   # Not available in new method
+                    'std_lowside': np.nan,    # Not available in new method
+                    'strategy': self.strategy,
+                    'direction': self.direction,
+                    'signal_direction': last_row.get('Momentum_Signal', None),
+                    'after_cutoff': False  # Default value
+                }
+                
+                # Save to CSV
+                self._save_technical_indicators_to_csv(df, metrics)
+            
+            return {
+                'high_band': last_row.get('Volatility_High_Band', np.nan),
+                'low_band': last_row.get('Volatility_Low_Band', np.nan),
+                'high_exceedance': last_row.get('High_Exceedance', 0),
+                'low_exceedance': last_row.get('Low_Exceedance', 0),
+                'trading_signal': None,
+                'signal_direction': last_row.get('Momentum_Signal', None),
+                'distance_to_high': last_row.get('Distance_To_High_Pct', np.nan),
+                'distance_to_low': last_row.get('Distance_To_Low_Pct', np.nan),
+                'position_in_range': last_row.get('Position_In_Range_Pct', np.nan),
+                'current_price': last_row.get('close', np.nan)
+            }
+        return None
+
+    def _save_technical_indicators_to_csv(self, df, metrics):
+        """Save comprehensive technical indicator data to CSV files organized by indicator type"""
+        try:
+            # Create directory structure for organized CSV storage
+            base_dir = "/Users/isaac/AdaptiveLossArchitecture/data/results"
+            
+            # Create subdirectories for different indicator categories
+            directories = {
+                'volatility': os.path.join(base_dir, 'volatility_indicators'),
+                'bands': os.path.join(base_dir, 'band_indicators'), 
+                'signals': os.path.join(base_dir, 'signal_indicators'),
+                'price_analysis': os.path.join(base_dir, 'price_analysis'),
+                'comprehensive': os.path.join(base_dir, 'comprehensive_indicators')
+            }
+            
+            # Create directories if they don't exist
+            for dir_path in directories.values():
+                os.makedirs(dir_path, exist_ok=True)
+            
+            # Get current bar data
+            current_bar = df.iloc[-1]
+            prev_bar = df.iloc[-2] if len(df) > 1 else current_bar
+            
+            # Safe get function for metrics
+            def safe_get(key, default=np.nan):
+                return metrics.get(key, default) if metrics.get(key) is not None else default
+            
+            # 1. Volatility Indicators CSV
+            volatility_data = {
+                'timestamp': metrics['timestamp'],
+                'current_price': metrics['current_price'],
+                'prev_close': metrics['prev_close'],
+                'price_change': metrics['current_price'] - metrics['prev_close'],
+                'price_change_pct': ((metrics['current_price'] - metrics['prev_close']) / metrics['prev_close']) * 100 if metrics['prev_close'] != 0 else 0,
+                'high_volatility': current_bar['high'] - current_bar['low'],
+                'high_exceedance': safe_get('high_exceedance', 0),
+                'low_exceedance': safe_get('low_exceedance', 0),
+                'total_exceedance': safe_get('high_exceedance', 0) + safe_get('low_exceedance', 0)
+            }
+            
+            self._append_to_csv(os.path.join(directories['volatility'], 'volatility_metrics.csv'), volatility_data)
+            
+            # 2. Band Indicators CSV
+            band_data = {
+                'timestamp': metrics['timestamp'],
+                'current_price': metrics['current_price'],
+                'high_band': safe_get('high_side_limit'),
+                'low_band': safe_get('low_side_limit'),
+                'band_midpoint': safe_get('band_midpoint'),
+                'band_range': safe_get('band_range'),
+                'band_width_pct': (safe_get('band_range') / metrics['current_price']) * 100 if metrics['current_price'] != 0 and not pd.isna(safe_get('band_range')) else np.nan,
+                'distance_to_high_band': safe_get('distance_to_high'),
+                'distance_to_low_band': safe_get('distance_to_low'),
+                'position_in_range_pct': safe_get('position_in_range'),
+                'above_midpoint': 1 if not pd.isna(safe_get('band_midpoint')) and metrics['current_price'] > safe_get('band_midpoint') else 0,
+                'near_high_band': 1 if not pd.isna(safe_get('position_in_range')) and safe_get('position_in_range') >= 90 else 0,
+                'near_low_band': 1 if not pd.isna(safe_get('position_in_range')) and safe_get('position_in_range') <= 10 else 0
+            }
+            
+            self._append_to_csv(os.path.join(directories['bands'], 'band_metrics.csv'), band_data)
+            
+            # 3. Signal Indicators CSV
+            signal_data = {
+                'timestamp': metrics['timestamp'],
+                'current_price': metrics['current_price'],
+                'position_in_range_pct': safe_get('position_in_range'),
+                'strategy': safe_get('strategy', 'momentum'),
+                'direction_setting': safe_get('direction', 'long'),
+                'signal_direction': safe_get('signal_direction', 'None'),
+                'long_signal': 1 if safe_get('signal_direction') == 'LONG' else 0,
+                'short_signal': 1 if safe_get('signal_direction') == 'SHORT' else 0
+            }
+            
+            self._append_to_csv(os.path.join(directories['signals'], 'signal_metrics.csv'), signal_data)
+            
+            # 4. Price Analysis CSV
+            price_data = {
+                'timestamp': metrics['timestamp'],
+                'open': current_bar['open'],
+                'high': current_bar['high'],
+                'low': current_bar['low'],
+                'close': current_bar['close'],
+                'volume': current_bar.get('volume', 0),
+                'prev_close': metrics['prev_close'],
+                'intraday_range': current_bar['high'] - current_bar['low'],
+                'intraday_range_pct': ((current_bar['high'] - current_bar['low']) / current_bar['close']) * 100 if current_bar['close'] != 0 else 0,
+                'gap_from_prev': current_bar['open'] - metrics['prev_close'],
+                'gap_pct': ((current_bar['open'] - metrics['prev_close']) / metrics['prev_close']) * 100 if metrics['prev_close'] != 0 else 0,
+                'body_size': abs(current_bar['close'] - current_bar['open']),
+                'upper_wick': current_bar['high'] - max(current_bar['open'], current_bar['close']),
+                'lower_wick': min(current_bar['open'], current_bar['close']) - current_bar['low'],
+                'bullish_candle': 1 if current_bar['close'] > current_bar['open'] else 0
+            }
+            
+            self._append_to_csv(os.path.join(directories['price_analysis'], 'price_analysis.csv'), price_data)
+            
+            # 5. Comprehensive Indicators CSV (all data in one file) - This matches what neural models see
+            comprehensive_data = {**volatility_data, **band_data, **signal_data, **price_data}
+            # Remove duplicate timestamp columns
+            comprehensive_data = {k: v for k, v in comprehensive_data.items() if not (k.startswith('timestamp') and k != 'timestamp')}
+            
+            self._append_to_csv(os.path.join(directories['comprehensive'], 'all_indicators.csv'), comprehensive_data)
+            
+            self.logger.info(f"Technical indicators saved to CSV files in {base_dir}")
+            
+        except Exception as e:
+            self.logger.error(f"Error saving technical indicators to CSV: {str(e)}")
+            import traceback
+            self.logger.error(f"Traceback: {traceback.format_exc()}")
+    
+    def _save_technical_indicators_to_csv_row(self, timestamp, metrics):
+        """Save individual row technical indicator data to CSV files"""
+        try:
+            # Create directory structure for organized CSV storage
+            base_dir = "/Users/isaac/AdaptiveLossArchitecture/data/results"
+            
+            # Create subdirectories for different indicator categories
+            directories = {
+                'volatility': os.path.join(base_dir, 'volatility_indicators'),
+                'bands': os.path.join(base_dir, 'band_indicators'), 
+                'signals': os.path.join(base_dir, 'signal_indicators'),
+                'price_analysis': os.path.join(base_dir, 'price_analysis'),
+                'comprehensive': os.path.join(base_dir, 'comprehensive_indicators')
+            }
+            
+            # Create directories if they don't exist
+            for dir_path in directories.values():
+                os.makedirs(dir_path, exist_ok=True)
+            
+            # Get current bar data
+            current_bar = metrics['current_bar']
+            
+            # 1. Volatility Indicators CSV
+            volatility_data = {
+                'timestamp': timestamp,
+                'current_price': metrics['current_price'],
+                'prev_close': metrics['prev_close'],
+                'price_change': metrics['current_price'] - metrics['prev_close'],
+                'price_change_pct': ((metrics['current_price'] - metrics['prev_close']) / metrics['prev_close']) * 100,
+                'high_volatility': current_bar['high'] - current_bar['low'],
+                'high_exceedance': metrics['high_exceedance'],
+                'low_exceedance': metrics['low_exceedance'],
+                'total_exceedance': metrics['high_exceedance'] + metrics['low_exceedance']
+            }
+            
+            self._append_to_csv(os.path.join(directories['volatility'], 'volatility_metrics.csv'), volatility_data)
+            
+            # 2. Band Indicators CSV
+            band_data = {
+                'timestamp': timestamp,
+                'current_price': metrics['current_price'],
+                'high_band': metrics['high_side_limit'],
+                'low_band': metrics['low_side_limit'],
+                'band_midpoint': metrics['band_midpoint'],
+                'band_range': metrics['band_range'],
+                'band_width_pct': (metrics['band_range'] / metrics['current_price']) * 100,
+                'distance_to_high_band': metrics['distance_to_high'],
+                'distance_to_low_band': metrics['distance_to_low'],
+                'position_in_range_pct': metrics['position_in_range'],
+                'above_midpoint': 1 if metrics['current_price'] > metrics['band_midpoint'] else 0,
+                'near_high_band': 1 if metrics['position_in_range'] >= 90 else 0,
+                'near_low_band': 1 if metrics['position_in_range'] <= 10 else 0
+            }
+            
+            self._append_to_csv(os.path.join(directories['bands'], 'band_metrics.csv'), band_data)
+            
+            # 3. Signal Indicators CSV
+            signal_data = {
+                'timestamp': timestamp,
+                'current_price': metrics['current_price'],
+                'position_in_range_pct': metrics['position_in_range'],
+                'momentum_signal': metrics['momentum_signal'] if metrics['momentum_signal'] else 'None',
+                'long_signal': 1 if metrics['momentum_signal'] == 'LONG' else 0,
+                'short_signal': 1 if metrics['momentum_signal'] == 'SHORT' else 0
+            }
+            
+            self._append_to_csv(os.path.join(directories['signals'], 'signal_metrics.csv'), signal_data)
+            
+            # 4. Price Analysis CSV
+            price_data = {
+                'timestamp': timestamp,
+                'open': current_bar['open'],
+                'high': current_bar['high'],
+                'low': current_bar['low'],
+                'close': current_bar['close'],
+                'volume': current_bar['volume'] if 'volume' in current_bar else 0,
+                'prev_close': metrics['prev_close'],
+                'intraday_range': current_bar['high'] - current_bar['low'],
+                'intraday_range_pct': ((current_bar['high'] - current_bar['low']) / current_bar['close']) * 100,
+                'gap_from_prev': current_bar['open'] - metrics['prev_close'],
+                'gap_pct': ((current_bar['open'] - metrics['prev_close']) / metrics['prev_close']) * 100,
+                'body_size': abs(current_bar['close'] - current_bar['open']),
+                'upper_wick': current_bar['high'] - max(current_bar['open'], current_bar['close']),
+                'lower_wick': min(current_bar['open'], current_bar['close']) - current_bar['low'],
+                'bullish_candle': 1 if current_bar['close'] > current_bar['open'] else 0
+            }
+            
+            self._append_to_csv(os.path.join(directories['price_analysis'], 'price_analysis.csv'), price_data)
+            
+            # 5. Comprehensive Indicators CSV (all data in one file)
+            comprehensive_data = {**volatility_data, **band_data, **signal_data, **price_data}
+            # Remove duplicate timestamp columns
+            comprehensive_data = {k: v for k, v in comprehensive_data.items() if not (k.startswith('timestamp') and k != 'timestamp')}
+            
+            self._append_to_csv(os.path.join(directories['comprehensive'], 'all_indicators.csv'), comprehensive_data)
+            
+        except Exception as e:
+            self.logger.error(f"Error saving technical indicators row to CSV: {str(e)}")
+
+    def _append_to_csv(self, filepath, data):
+        """Append data to CSV file, creating headers if file doesn't exist"""
+        try:
+            file_exists = os.path.isfile(filepath)
+            
+            # Convert data to DataFrame, ensuring timestamp is preserved correctly
+            df_new = pd.DataFrame([data])
+            
+            # Debug: Log the timestamp being saved
+            if 'timestamp' in data:
+                self.logger.debug(f"Saving timestamp to CSV: {data['timestamp']} (type: {type(data['timestamp'])})")
+            
+            if file_exists:
+                # Append to existing file
+                df_new.to_csv(filepath, mode='a', header=False, index=False, date_format='%Y-%m-%d %H:%M:%S')
+            else:
+                # Create new file with headers
+                df_new.to_csv(filepath, mode='w', header=True, index=False, date_format='%Y-%m-%d %H:%M:%S')
+                
+        except Exception as e:
+            self.logger.error(f"Error appending to CSV {filepath}: {str(e)}")
 
 def calculate_sma(data, window):
     """Calculate Simple Moving Average"""
@@ -519,8 +897,8 @@ def main():
         # Get subset of data up to current row
         subset_df = df_temp.iloc[:i+1].copy()
         
-        # Calculate volatility metrics
-        vol_metrics = calculator.calculate_volatility_metrics(subset_df)
+        # Calculate volatility metrics WITHOUT saving to CSV (save_to_csv=False)
+        vol_metrics = calculator.calculate_volatility_metrics(subset_df, save_to_csv=False)
         
         if vol_metrics:
             # Store volatility band values
@@ -583,7 +961,7 @@ def main():
     
     # Create output filename with timestamp
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    output_file = f'data/NVDA_with_indicators_{timestamp}.csv'
+    output_file = f'data/NVDA_with_indicators.csv'
     
     # Save the enhanced dataset
     print(f"Saving enhanced dataset to {output_file}...")

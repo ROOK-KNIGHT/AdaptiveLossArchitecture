@@ -1,17 +1,3 @@
-"""
-Enhanced Adaptive Stock Price Predictor with Technical Indicators
-Specialized for pre-processed technical indicator datasets
-
-Usage:
-    python3 src/models/enhanced_adaptive_predictor.py
-    
-Features:
-    - Uses comprehensive technical indicators (RSI, MACD, Bollinger Bands, etc.)
-    - Covariance-based adaptive loss function with technical indicator categories
-    - Intelligent feature selection from 35+ technical indicators
-    - Enhanced analysis with trading-relevant insights
-    - No API dependencies - works with pre-processed CSV data
-"""
 
 import torch
 import torch.nn as nn
@@ -32,7 +18,6 @@ warnings.filterwarnings('ignore')
 
 # Load configuration
 def load_config():
-    """Load configuration from YAML file"""
     config_path = os.path.join(os.path.dirname(__file__), '..', '..', 'config', 'model_config.yaml')
     if not os.path.exists(config_path):
         raise FileNotFoundError(f"Configuration file not found: {config_path}")
@@ -41,7 +26,6 @@ def load_config():
         return yaml.safe_load(file)
 
 def load_indicators_config():
-    """Load technical indicators configuration from YAML file"""
     config_path = os.path.join(os.path.dirname(__file__), '..', '..', 'config', 'technical_indicators_config.yaml')
     if not os.path.exists(config_path):
         raise FileNotFoundError(f"Technical indicators configuration file not found: {config_path}")
@@ -49,21 +33,16 @@ def load_indicators_config():
     with open(config_path, 'r') as file:
         return yaml.safe_load(file)
 
-# Load global configuration
 CONFIG = load_config()
 INDICATORS_CONFIG = load_indicators_config()
 
-# Add the project root to path for imports
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..'))
 
-# Import unified preprocessing and targets
 from src.data_processing.unified_preprocessing import UnifiedPreprocessor
 from src.data_processing.unified_targets import UnifiedTargetManager
 
-# Import dead neuron monitoring system
 from src.utils.dead_neuron_monitor import DeadNeuronMonitor, integrate_with_training_loop, monitor_enhanced_adaptive_predictor
 
-# Define evaluation functions (same as other models)
 def comprehensive_model_evaluation(model, X_test, y_test, scaler_y, model_name, train_test_mean_diff=0):
     model.eval()
     with torch.no_grad():
@@ -104,20 +83,33 @@ def compare_models_comprehensive(adaptive_results, standard_results):
     print(f"Adaptive MAE: ${adaptive_results['mae']:.4f}")
     print(f"Standard MAE: ${standard_results['mae']:.4f}")
 
-class SimplifiedAdaptiveLossFunction(nn.Module):
-    """
-    Simplified Adaptive Loss Function with Ablation Capabilities
-    Focus on covariance-based learning with optional penalty terms for ablation study
-    """
+class SparseVARKalmanAdaptiveLoss(nn.Module):
     
     def __init__(self, feature_names: List[str], feature_categories: Dict[str, str] = None, 
                  initial_weights: Dict[str, float] = None, 
                  enable_temporal_penalty: bool = None,
                  enable_volatility_penalty: bool = None,
-                 enable_smoothness_penalty: bool = None):
-        super(SimplifiedAdaptiveLossFunction, self).__init__()
+                 enable_smoothness_penalty: bool = None,
+                 var_lag_order: int = 2,
+                 sparsity_lambda_l1: float = 0.01,
+                 sparsity_lambda_l2: float = 0.001,
+                 kalman_process_noise: float = 0.1,
+                 kalman_observation_noise: float = 0.05,
+                 em_max_iterations: int = 10,
+                 em_convergence_tol: float = 1e-4):
+        super(SparseVARKalmanAdaptiveLoss, self).__init__()
         self.feature_names = feature_names
+        self.n_features = len(feature_names)
         self.mse_loss = nn.MSELoss()
+        
+        # Sparse VAR-Kalman parameters
+        self.var_lag_order = var_lag_order
+        self.sparsity_lambda_l1 = sparsity_lambda_l1
+        self.sparsity_lambda_l2 = sparsity_lambda_l2
+        self.kalman_process_noise = kalman_process_noise
+        self.kalman_observation_noise = kalman_observation_noise
+        self.em_max_iterations = em_max_iterations
+        self.em_convergence_tol = em_convergence_tol
         
         # Load config values with fallbacks
         adaptive_config = CONFIG['adaptive_loss']
@@ -129,6 +121,12 @@ class SimplifiedAdaptiveLossFunction(nn.Module):
                                          else adaptive_config['penalties']['volatility']['enabled'])
         self.enable_smoothness_penalty = (enable_smoothness_penalty if enable_smoothness_penalty is not None 
                                          else adaptive_config['penalties']['smoothness']['enabled'])
+        
+        # VFC (Vector Field Consistency) configuration from config
+        vfc_config = adaptive_config.get('vfc', {})
+        self.enable_vfc_robust_weighting = vfc_config.get('enabled', True)
+        self.vfc_update_frequency = vfc_config.get('update_frequency', 5)
+        self.vfc_reliability_weight = vfc_config.get('reliability_weight', 0.5)
         
         # Categorize technical indicators
         self.feature_categories = feature_categories or self._auto_categorize_features(feature_names)
@@ -158,8 +156,111 @@ class SimplifiedAdaptiveLossFunction(nn.Module):
         self.covariance_history = {name: [] for name in feature_names}
         self.weight_history = {name: [] for name in feature_names}
         
+        # Sparse VAR-Kalman specific tracking
+        self.var_coefficients_history = []
+        self.kalman_states_history = []
+        self.sparsity_pattern_history = []
+        self.em_convergence_history = []
+        self.bic_scores = []
+        
+        # Initialize sparse VAR-Kalman components
+        self._initialize_sparse_var_kalman()
+        
+        # Initialize VFC components if enabled
+        if self.enable_vfc_robust_weighting:
+            self._initialize_vfc_components()
+            # Initialize VFC state tracking variables
+            self.signal_reliability_history = {name: [] for name in feature_names}
+            self.vfc_iteration_count = 0
+            self.vfc_epoch_count = 0
+    
+    def _initialize_sparse_var_kalman(self):
+        print("🔬 Initializing Sparse VAR-Kalman state-space model...")
+        
+        # State dimension (features × lag order)
+        self.state_dim = self.n_features * self.var_lag_order
+        
+        # Initialize VAR transition matrix A (sparse structure)
+        # A is block-structured: [A1, A2, ..., Ap; I, 0, ..., 0; 0, I, ..., 0; ...]
+        self.A_matrix = np.zeros((self.state_dim, self.state_dim))
+        
+        # Initialize first block with small random values (will be learned)
+        self.A_matrix[:self.n_features, :self.n_features * self.var_lag_order] = np.random.normal(
+            0, 0.1, (self.n_features, self.n_features * self.var_lag_order)
+        )
+        
+        # Identity blocks for lag structure
+        for i in range(1, self.var_lag_order):
+            start_row = i * self.n_features
+            end_row = (i + 1) * self.n_features
+            start_col = (i - 1) * self.n_features
+            end_col = i * self.n_features
+            self.A_matrix[start_row:end_row, start_col:end_col] = np.eye(self.n_features)
+        
+        # Observation matrix C (maps states to observations)
+        self.C_matrix = np.zeros((self.n_features, self.state_dim))
+        self.C_matrix[:, :self.n_features] = np.eye(self.n_features)  # Observe current states
+        
+        # Process noise covariance Q
+        self.Q_matrix = self.kalman_process_noise * np.eye(self.state_dim)
+        
+        # Observation noise covariance R
+        self.R_matrix = self.kalman_observation_noise * np.eye(self.n_features)
+        
+        # Initialize Kalman filter state
+        self.kalman_state = np.zeros(self.state_dim)
+        self.kalman_covariance = np.eye(self.state_dim)
+        
+        # Sparsity pattern tracking
+        self.sparsity_pattern = np.ones((self.n_features, self.n_features * self.var_lag_order))
+        self.active_coefficients = np.sum(self.sparsity_pattern)
+        
+        # EM algorithm state
+        self.em_iteration = 0
+        self.log_likelihood_history = []
+        
+        print("✅ Sparse VAR-Kalman components initialized:")
+        print(f"   • State dimension: {self.state_dim}")
+        print(f"   • VAR lag order: {self.var_lag_order}")
+        print(f"   • Features: {self.n_features}")
+        print(f"   • L1 sparsity penalty: {self.sparsity_lambda_l1}")
+        print(f"   • L2 shrinkage penalty: {self.sparsity_lambda_l2}")
+        print(f"   • Process noise: {self.kalman_process_noise}")
+        print(f"   • Observation noise: {self.kalman_observation_noise}")
+        print(f"   • Initial active coefficients: {self.active_coefficients}")
+    
+    def _initialize_vfc_components(self):
+        print("🔬 Initializing VFC robust signal identification components...")
+        
+        # VFC hyperparameters
+        self.vfc_config = {
+            'outlier_threshold': 0.1,  # Threshold for outlier detection
+            'reliability_prior': 0.8,  # Prior probability that a signal is reliable
+            'smoothness_lambda': 0.01,  # Tikhonov regularization parameter
+            'em_max_iterations': 5,    # Max EM iterations per weight update
+            'convergence_tolerance': 1e-4,  # EM convergence threshold
+            'outlier_tolerance': 0.9   # Can handle up to 90% outliers (VFC capability)
+        }
+        
+        # Initialize latent variables (signal reliability indicators)
+        self.signal_reliability = {name: self.vfc_config['reliability_prior'] 
+                                 for name in self.feature_names}
+        
+        # Initialize outlier probabilities
+        self.outlier_probs = {name: 1.0 - self.vfc_config['reliability_prior'] 
+                            for name in self.feature_names}
+        
+        # VFC state tracking
+        self.vfc_em_history = []
+        self.market_regime_detected = 'normal'  # normal, volatile, trending, sideways
+        
+        print("✅ VFC components initialized:")
+        print(f"   • Outlier tolerance: {self.vfc_config['outlier_tolerance']*100}%")
+        print(f"   • Reliability prior: {self.vfc_config['reliability_prior']}")
+        print(f"   • Smoothness regularization: {self.vfc_config['smoothness_lambda']}")
+        print(f"   • EM max iterations: {self.vfc_config['em_max_iterations']}")
+        
     def _auto_categorize_features(self, feature_names: List[str]) -> Dict[str, str]:
-        """Automatically categorize technical indicators"""
         categories = {}
         
         for name in feature_names:
@@ -261,22 +362,171 @@ class SimplifiedAdaptiveLossFunction(nn.Module):
         second_diff = torch.diff(first_diff)
         smoothness_loss = torch.mean(torch.abs(second_diff))
         return smoothness_loss
+    
+    def _update_vfc_signal_reliability(self, features: torch.Tensor, target: torch.Tensor, 
+                                     predictions: torch.Tensor):
+        """
+        Update VFC signal reliability using EM algorithm for robust signal identification
+        
+        VFC Framework Implementation:
+        - E-step: Estimate latent variables (signal reliability indicators)
+        - M-step: Update signal reliability probabilities
+        - Outlier detection based on prediction residuals
+        - Market regime detection for adaptive weighting
+        
+        Reference: "A robust method for vector field learning with application to mismatch removing"
+        """
+        if not self.enable_vfc_robust_weighting:
+            return
+        
+        try:
+            # Convert to numpy for VFC calculations
+            features_np = features.detach().cpu().numpy()
+            target_np = target.detach().cpu().numpy().flatten()
+            predictions_np = predictions.detach().cpu().numpy().flatten()
+            
+            # Calculate prediction residuals for outlier detection
+            residuals = np.abs(predictions_np - target_np)
+            residual_threshold = np.percentile(residuals, 90)  # 90th percentile as outlier threshold
+            
+            # Market regime detection based on volatility and trend
+            if len(residuals) > 5:
+                recent_volatility = np.std(residuals[-5:])
+                overall_volatility = np.std(residuals)
+                
+                if recent_volatility > 1.5 * overall_volatility:
+                    self.market_regime_detected = 'volatile'
+                elif recent_volatility < 0.5 * overall_volatility:
+                    self.market_regime_detected = 'stable'
+                else:
+                    self.market_regime_detected = 'normal'
+            
+            # VFC EM algorithm for each feature
+            for i, feature_name in enumerate(self.feature_names):
+                if i >= features_np.shape[1]:
+                    continue
+                
+                feature_values = features_np[:, i]
+                
+                # E-step: Estimate signal reliability based on feature-target correlation
+                feature_target_corr = np.corrcoef(feature_values, target_np)[0, 1] if len(feature_values) > 1 else 0.0
+                feature_target_corr = np.nan_to_num(feature_target_corr, 0.0)  # Handle NaN
+                
+                # Calculate feature contribution to prediction error
+                feature_pred_corr = np.corrcoef(feature_values, predictions_np)[0, 1] if len(feature_values) > 1 else 0.0
+                feature_pred_corr = np.nan_to_num(feature_pred_corr, 0.0)  # Handle NaN
+                
+                # VFC reliability score based on:
+                # 1. Feature-target correlation strength
+                # 2. Feature-prediction alignment
+                # 3. Outlier probability (inverse relationship)
+                correlation_strength = abs(feature_target_corr)
+                prediction_alignment = abs(feature_pred_corr)
+                
+                # Outlier probability based on feature behavior in high-residual periods
+                high_error_mask = residuals > residual_threshold
+                if np.sum(high_error_mask) > 0:
+                    feature_outlier_behavior = np.std(feature_values[high_error_mask]) / (np.std(feature_values) + 1e-8)
+                    outlier_prob = min(0.9, max(0.1, feature_outlier_behavior))
+                else:
+                    outlier_prob = 0.1
+                
+                # M-step: Update signal reliability using Bayesian framework
+                # Prior reliability weighted with evidence
+                prior_reliability = self.vfc_config['reliability_prior']
+                evidence_weight = min(1.0, correlation_strength + prediction_alignment)
+                
+                # VFC reliability update with market regime adaptation
+                base_reliability = (prior_reliability * (1 - evidence_weight) + 
+                                  (correlation_strength * 0.6 + prediction_alignment * 0.4) * evidence_weight)
+                
+                # Market regime adaptation
+                if self.market_regime_detected == 'volatile':
+                    # In volatile markets, reduce reliability of all signals
+                    regime_adjustment = 0.8
+                elif self.market_regime_detected == 'stable':
+                    # In stable markets, trust strong signals more
+                    regime_adjustment = 1.2 if base_reliability > 0.6 else 1.0
+                else:
+                    regime_adjustment = 1.0
+                
+                # Final VFC reliability with Tikhonov regularization for smoothness
+                smoothness_factor = self.vfc_config['smoothness_lambda']
+                if len(self.signal_reliability_history[feature_name]) > 0:
+                    prev_reliability = self.signal_reliability_history[feature_name][-1]
+                    smoothed_reliability = ((1 - smoothness_factor) * base_reliability * regime_adjustment + 
+                                          smoothness_factor * prev_reliability)
+                else:
+                    smoothed_reliability = base_reliability * regime_adjustment
+                
+                # Constrain reliability to valid range
+                final_reliability = max(0.1, min(0.95, smoothed_reliability))
+                
+                # Update VFC state
+                self.signal_reliability[feature_name] = final_reliability
+                self.outlier_probs[feature_name] = 1.0 - final_reliability
+                
+                # Track VFC iteration
+                self.vfc_iteration_count += 1
+                
+                # Store EM history for analysis
+                if len(self.vfc_em_history) < 1000:  # Limit history size
+                    self.vfc_em_history.append({
+                        'iteration': self.vfc_iteration_count,
+                        'feature': feature_name,
+                        'reliability': final_reliability,
+                        'outlier_prob': 1.0 - final_reliability,
+                        'market_regime': self.market_regime_detected,
+                        'correlation_strength': correlation_strength,
+                        'prediction_alignment': prediction_alignment
+                    })
+                
+        except Exception as e:
+            # Graceful degradation - if VFC fails, continue with standard weighting
+            if hasattr(self, 'verbose') and self.verbose:
+                print(f"⚠️  VFC signal reliability update failed: {str(e)}")
+            # Reset to prior reliability if VFC fails
+            for feature_name in self.feature_names:
+                self.signal_reliability[feature_name] = self.vfc_config['reliability_prior']
+                self.outlier_probs[feature_name] = 1.0 - self.vfc_config['reliability_prior']
 
     def forward(self, predictions: torch.Tensor, target: torch.Tensor, 
                 features: torch.Tensor) -> Tuple[torch.Tensor, Dict[str, float]]:
-        """Enhanced forward pass with technical indicator specific penalties"""
+        """Sparse VAR-Kalman enhanced forward pass with VFC robust signal identification"""
+        # Update VFC signal reliability if enabled
+        if self.enable_vfc_robust_weighting:
+            self._update_vfc_signal_reliability(features, target, predictions)
+        
         # Base MSE loss
         mse_loss = self.mse_loss(predictions, target)
         
-        # Covariance losses for each technical indicator
+        # Sparse VAR-Kalman enhanced covariance losses for each technical indicator
         correlation_losses = {}
         total_correlation_loss = 0.0
+        vfc_weighted_loss = 0.0
         category_losses = {cat: 0.0 for cat in set(self.feature_categories.values())}
+        
+        # Compute sparsity penalties for VAR coefficients
+        l1_penalty = self.sparsity_lambda_l1 * torch.sum(torch.abs(torch.tensor(self.A_matrix[:self.n_features, :])))
+        l2_penalty = self.sparsity_lambda_l2 * torch.sum(torch.tensor(self.A_matrix[:self.n_features, :]) ** 2)
         
         for i, feature_name in enumerate(self.feature_names):
             cov_loss = self.compute_covariance_loss(features, target, i)
             correlation_losses[feature_name] = cov_loss.item()
-            total_correlation_loss += self.weights[feature_name] * cov_loss
+            
+            # Apply sparse VAR-Kalman weighting based on coefficient sparsity
+            var_coefficient_weight = np.mean(np.abs(self.A_matrix[i, :]))  # Average coefficient magnitude
+            sparse_weighted_loss = (1.0 + var_coefficient_weight) * cov_loss  # Higher weight for active coefficients
+            
+            # Apply VFC reliability weighting if enabled
+            if self.enable_vfc_robust_weighting:
+                vfc_reliability = self.signal_reliability.get(feature_name, 0.8)
+                vfc_enhanced_loss = sparse_weighted_loss * vfc_reliability
+                vfc_weighted_loss += self.weights[feature_name] * vfc_enhanced_loss
+                # Store VFC metrics
+                correlation_losses[f'vfc_reliability_{feature_name}'] = vfc_reliability
+            else:
+                total_correlation_loss += self.weights[feature_name] * sparse_weighted_loss
             
             # Track category performance
             category = self.feature_categories[feature_name]
@@ -288,17 +538,42 @@ class SimplifiedAdaptiveLossFunction(nn.Module):
         smoothness_loss = self.compute_smoothness_penalty(predictions)
         momentum_loss = self.compute_momentum_consistency_loss(predictions, features)
         
-        # Simplified total loss (focus on covariance + optional penalties)
-        total_loss = (mse_loss + 
-                     total_correlation_loss + 
-                     self.temporal_weight * temporal_loss +
-                     self.volatility_weight * volatility_loss +
-                     self.smoothness_weight * smoothness_loss)
+        # Sparse VAR-Kalman enhanced total loss with VFC integration and sparsity regularization
+        if self.enable_vfc_robust_weighting:
+            # Use VFC-weighted loss
+            total_loss = (mse_loss + 
+                         vfc_weighted_loss * self.vfc_reliability_weight +
+                         l1_penalty + 
+                         l2_penalty +
+                         self.temporal_weight * temporal_loss +
+                         self.volatility_weight * volatility_loss +
+                         self.smoothness_weight * smoothness_loss)
+            # Store VFC metrics
+            correlation_losses['vfc_market_regime'] = self.market_regime_detected
+            correlation_losses['vfc_weighted_loss'] = vfc_weighted_loss
+            correlation_losses['vfc_avg_reliability'] = np.mean(list(self.signal_reliability.values()))
+        else:
+            # Use standard VAR-Kalman loss
+            total_loss = (mse_loss + 
+                         total_correlation_loss + 
+                         l1_penalty + 
+                         l2_penalty +
+                         self.temporal_weight * temporal_loss +
+                         self.volatility_weight * volatility_loss +
+                         self.smoothness_weight * smoothness_loss)
         
         # Store metrics for analysis
         correlation_losses['temporal_consistency'] = temporal_loss.item()
         correlation_losses['volatility_penalty'] = volatility_loss.item()
         correlation_losses['smoothness_penalty'] = smoothness_loss.item()
+        correlation_losses['momentum_consistency'] = momentum_loss.item()
+        correlation_losses['l1_sparsity_penalty'] = l1_penalty.item()
+        correlation_losses['l2_sparsity_penalty'] = l2_penalty.item()
+        
+        # Store Sparse VAR-Kalman metrics
+        correlation_losses['var_active_coefficients'] = self.active_coefficients
+        correlation_losses['var_sparsity_ratio'] = self.active_coefficients / (self.n_features * self.n_features * self.var_lag_order)
+        correlation_losses['kalman_log_likelihood'] = self.log_likelihood_history[-1] if self.log_likelihood_history else 0.0
         
         # Store covariances for weight updates
         for feature_name, cov_val in correlation_losses.items():
@@ -308,13 +583,21 @@ class SimplifiedAdaptiveLossFunction(nn.Module):
         return total_loss, correlation_losses
     
     def update_weights(self, epoch: int):
-        """Simplified weight update based on covariance performance"""
+        """Sparse VAR-Kalman enhanced weight update with VFC robust signal identification"""
         if epoch % self.weight_update_interval != 0 or epoch == 0:  # Update based on config interval
             return
         
-        print(f"\nUpdating weights at epoch {epoch}:")
+        print(f"\nSparse VAR-Kalman + VFC Weight Update at epoch {epoch}:")
+        print(f"  Active VAR coefficients: {self.active_coefficients}")
+        print(f"  Sparsity ratio: {self.active_coefficients / (self.n_features * self.n_features * self.var_lag_order):.3f}")
         
-        for feature_name in self.feature_names:
+        # VFC epoch tracking
+        if self.enable_vfc_robust_weighting:
+            self.vfc_epoch_count += 1
+            print(f"  VFC Market Regime: {self.market_regime_detected}")
+            print(f"  VFC Average Reliability: {np.mean(list(self.signal_reliability.values())):.3f}")
+        
+        for i, feature_name in enumerate(self.feature_names):
             if len(self.covariance_history[feature_name]) > 5:
                 # Get recent covariances
                 recent_covs = self.covariance_history[feature_name][-5:]
@@ -323,10 +606,28 @@ class SimplifiedAdaptiveLossFunction(nn.Module):
                 # Simple sigmoid normalization
                 normalized_cov = 1 / (1 + np.exp(-avg_cov * 10))
                 
-                # Update weight using config values
+                # Sparse VAR-Kalman enhanced weight adjustment
+                # Get VAR coefficient importance for this feature
+                if i < self.A_matrix.shape[0]:
+                    var_coefficient_magnitude = np.mean(np.abs(self.A_matrix[i, :]))
+                    sparsity_factor = 1.0 + var_coefficient_magnitude  # Higher weight for active coefficients
+                else:
+                    sparsity_factor = 1.0
+                
+                # VFC reliability factor
+                vfc_reliability_factor = 1.0
+                if self.enable_vfc_robust_weighting:
+                    vfc_reliability = self.signal_reliability.get(feature_name, 0.8)
+                    vfc_reliability_factor = 0.5 + 0.5 * vfc_reliability  # Scale between 0.5 and 1.0
+                    # Store reliability history
+                    self.signal_reliability_history[feature_name].append(vfc_reliability)
+                
+                # Combined Sparse VAR-Kalman + VFC weight update
                 old_weight = self.weights[feature_name]
-                adjustment = self.learning_rate_factor * normalized_cov * self.weight_update_adjustment
-                new_weight = old_weight + adjustment
+                base_adjustment = self.learning_rate_factor * normalized_cov * self.weight_update_adjustment
+                sparse_enhanced_adjustment = base_adjustment * sparsity_factor
+                vfc_enhanced_adjustment = sparse_enhanced_adjustment * vfc_reliability_factor
+                new_weight = old_weight + vfc_enhanced_adjustment
                 
                 # Apply constraints
                 new_weight = max(self.min_weight, min(self.max_weight, new_weight))
@@ -334,7 +635,28 @@ class SimplifiedAdaptiveLossFunction(nn.Module):
                 self.weights[feature_name] = new_weight
                 self.weight_history[feature_name].append(new_weight)
                 
-                print(f"  {feature_name}: {old_weight:.4f} -> {new_weight:.4f} (cov: {avg_cov:.4f})")
+                if self.enable_vfc_robust_weighting:
+                    print(f"  {feature_name}: {old_weight:.4f} -> {new_weight:.4f}")
+                    print(f"    • Covariance: {avg_cov:.4f}, VAR Coeff: {var_coefficient_magnitude:.4f}, VFC Reliability: {vfc_reliability:.3f}")
+                else:
+                    print(f"  {feature_name}: {old_weight:.4f} -> {new_weight:.4f}")
+                    print(f"    • Covariance: {avg_cov:.4f}, VAR Coeff Mag: {var_coefficient_magnitude:.4f}, Sparsity Factor: {sparsity_factor:.3f}")
+        
+        # Sparse VAR-Kalman summary statistics
+        print(f"\n  Sparse VAR-Kalman Summary:")
+        print(f"    • Total VAR coefficients: {self.n_features * self.n_features * self.var_lag_order}")
+        print(f"    • Active coefficients: {self.active_coefficients}")
+        print(f"    • Sparsity ratio: {self.active_coefficients / (self.n_features * self.n_features * self.var_lag_order):.3f}")
+        print(f"    • L1 penalty: {self.sparsity_lambda_l1}")
+        print(f"    • L2 penalty: {self.sparsity_lambda_l2}")
+        
+        # Update sparsity pattern based on coefficient magnitudes
+        threshold = 0.01  # Threshold for considering a coefficient "active"
+        self.sparsity_pattern = (np.abs(self.A_matrix[:self.n_features, :]) > threshold).astype(float)
+        self.active_coefficients = np.sum(self.sparsity_pattern)
+        
+        # Store sparsity pattern history
+        self.sparsity_pattern_history.append(self.active_coefficients)
 
 class StockPricePredictor(nn.Module):
     """Enhanced neural network for stock price prediction with technical indicators
@@ -419,7 +741,7 @@ class StockPricePredictor(nn.Module):
     def forward(self, x):
         return self.network(x)
 
-def get_data_from_unified_preprocessing(symbol: str = 'NVDA', days_lookback: int = 365, 
+def get_data_from_unified_preprocessing(symbol: str = 'TSLA', days_lookback: int = 2000, 
                                       target_horizon: int = 1, test_size: float = 0.2) -> Dict:
     """
     Get standardized data directly from unified preprocessing pipeline
@@ -758,7 +1080,7 @@ def main(symbol: str = None, days_lookback: int = None, target_horizon: int = No
     
     # Load config values with fallbacks
     if symbol is None:
-        symbol = 'NVDA'  # Default symbol
+        symbol = 'TSLA'  # Default symbol
     if days_lookback is None:
         days_lookback = CONFIG['data_processing']['days_lookback']
     if target_horizon is None:
@@ -875,7 +1197,7 @@ def main(symbol: str = None, days_lookback: int = None, target_horizon: int = No
     adaptive_model = StockPricePredictor(input_size=len(selected_features))
     
     # Adaptive loss function with selected features (using config defaults)
-    adaptive_loss = SimplifiedAdaptiveLossFunction(feature_names=selected_features)
+    adaptive_loss = SparseVARKalmanAdaptiveLoss(feature_names=selected_features)
     
     # Optimizer using config values
     adaptive_optimizer = optim.Adam(

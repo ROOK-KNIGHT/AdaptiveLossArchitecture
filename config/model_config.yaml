@@ -62,6 +62,19 @@ adaptive_loss:
       enabled: true
       weight: 0.01
   
+  # VFC (Vector Field Consistency) Configuration
+  vfc:
+    enabled: true  # Enable VFC robust signal identification
+    outlier_threshold: 0.1  # Threshold for outlier detection
+    reliability_prior: 0.8  # Prior probability that a signal is reliable
+    smoothness_lambda: 0.01  # Tikhonov regularization parameter
+    em_max_iterations: 5  # Max EM iterations per weight update
+    convergence_tolerance: 1e-4  # EM convergence threshold
+    outlier_tolerance: 0.9  # Can handle up to 90% outliers
+    market_regime_adaptation: true  # Enable market regime detection
+    reliability_weight: 0.5  # Weight for VFC reliability in loss calculation
+    update_frequency: 5  # Update VFC every N epochs
+  
   # Feature category base weights
   category_base_weights:
     trend: 0.12

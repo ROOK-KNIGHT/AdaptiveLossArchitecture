@@ -678,8 +678,8 @@ class DeadNeuronMonitor:
             return
         
         if filename is None:
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"dead_neuron_monitoring_{self.model_info['model_type']}_{timestamp}.json"
+
+            filename = f"dead_neuron_monitoring_{self.model_info['model_type']}.json"
         
         filepath = os.path.join(self.results_dir, filename)
         

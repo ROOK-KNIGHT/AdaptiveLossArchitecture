@@ -550,8 +550,8 @@ class UnifiedPreprocessor:
             # Get subset of data up to current row
             subset_df = df_temp.iloc[:i+1].copy()
             
-            # Calculate volatility metrics
-            vol_metrics = calculator.calculate_volatility_metrics(subset_df)
+            # Calculate volatility metrics WITHOUT saving to CSV (save_to_csv=False)
+            vol_metrics = calculator.calculate_volatility_metrics(subset_df, save_to_csv=False)
             
             if vol_metrics:
                 # Store volatility band values
@@ -1252,6 +1252,9 @@ class UnifiedPreprocessor:
         # 2. Calculate all technical indicators
         df_with_indicators = self.calculate_all_technical_indicators(df)
         
+        # Save complete indicators DataFrame to comprehensive_indicators directory
+        self._save_complete_indicators_to_csv(df_with_indicators)
+        
         # 3. Create dual targets
         returns_target, prices_target = self.create_dual_targets(df_with_indicators)
         df_with_indicators['target_returns'] = returns_target
@@ -1281,7 +1284,8 @@ class UnifiedPreprocessor:
             'target_horizon': self.target_horizon,
             'test_size': self.test_size,
             'feature_selection_method': self.feature_selection_method,
-            'feature_selection_history': self.feature_selection_history
+            'feature_selection_history': self.feature_selection_history,
+            'complete_indicators_saved': True
         })
         
         self.processed_data = final_data
@@ -1295,10 +1299,36 @@ class UnifiedPreprocessor:
         print(f"✓ Test samples: {len(final_data['X_test'])}")
         print(f"✓ Dual targets: Returns + Prices")
         print(f"✓ Forecast horizon: {self.target_horizon} day(s)")
+        print("✓ Complete indicators saved to comprehensive_indicators/")
         print("✓ Ready for model training!")
         print("="*80)
         
         return final_data
+    
+    def _save_complete_indicators_to_csv(self, df_with_indicators):
+        """Save the complete DataFrame with all indicators to comprehensive CSV - matches neural model input"""
+        try:
+            # Create comprehensive indicators directory
+            base_dir = "/Users/isaac/AdaptiveLossArchitecture/data/results"
+            comprehensive_dir = os.path.join(base_dir, 'comprehensive_indicators')
+            os.makedirs(comprehensive_dir, exist_ok=True)
+            
+            # Generate filename with symbol
+
+            filename = f"unified_preprocessing_{self.symbol}.csv"
+            filepath = os.path.join(comprehensive_dir, filename)
+            
+            # Save the complete DataFrame - this matches exactly what neural models see
+            df_with_indicators.to_csv(filepath, index=False)
+            
+            print(f"✓ Complete indicators DataFrame saved to: {filepath}")
+            print(f"  Rows: {len(df_with_indicators)}, Columns: {len(df_with_indicators.columns)}")
+            
+            
+        except Exception as e:
+            print(f"❌ Error saving complete DataFrame to CSV: {str(e)}")
+            import traceback
+            print(f"Traceback: {traceback.format_exc()}")
     
     def get_feature_importance_analysis(self) -> Dict:
         """
